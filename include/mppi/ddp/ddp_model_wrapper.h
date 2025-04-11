@@ -26,11 +26,6 @@ bool getGrad(T* model, typename DDP_structures::Dynamics<float, T::STATE_DIM, T:
   bool exists = model->computeGrad(x, u, A, B);
   jac.block(0, 0, T::STATE_DIM, T::STATE_DIM) = A;
   jac.block(0, T::STATE_DIM, T::STATE_DIM, T::CONTROL_DIM) = B;
-  // for (int i = 0; i < T::STATE_DIM; i++){
-  //     for (int j = 0; j < T::STATE_DIM; j++){
-  //         jac(i,j) = A(i,j);
-  //     }
-  // }
   return exists;
 }
 
@@ -47,13 +42,14 @@ struct ModelWrapperDDP : public DDP_structures::Dynamics<float, DYNAMICS_T::STAT
 {
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
   using Scalar = float;
-  using State = typename DDP_structures::Dynamics<Scalar, DYNAMICS_T::STATE_DIM, DYNAMICS_T::CONTROL_DIM>::State;
-  using Control = typename DDP_structures::Dynamics<Scalar, DYNAMICS_T::STATE_DIM, DYNAMICS_T::CONTROL_DIM>::Control;
-  using Jacobian = typename DDP_structures::Dynamics<Scalar, DYNAMICS_T::STATE_DIM, DYNAMICS_T::CONTROL_DIM>::Jacobian;
+  using PARENT_CLASS = typename DDP_structures::Dynamics<Scalar, DYNAMICS_T::STATE_DIM, DYNAMICS_T::CONTROL_DIM>;
+  using State = PARENT_CLASS::State;
+  using Control = PARENT_CLASS::Control;
+  using Jacobian = PARENT_CLASS::Jacobian;
   using StateTrajectory =
-      typename DDP_structures::Dynamics<Scalar, DYNAMICS_T::STATE_DIM, DYNAMICS_T::CONTROL_DIM>::StateTrajectory;
+      PARENT_CLASS::StateTrajectory;
   using ControlTrajectory =
-      typename DDP_structures::Dynamics<Scalar, DYNAMICS_T::STATE_DIM, DYNAMICS_T::CONTROL_DIM>::ControlTrajectory;
+      PARENT_CLASS::ControlTrajectory;
 
   State state;
   Control control;
@@ -89,7 +85,7 @@ struct ModelWrapperDDP : public DDP_structures::Dynamics<float, DYNAMICS_T::STAT
         getGrad(model_, j_, state, control, std::integral_constant<bool, HasAnalyticGrad<DYNAMICS_T>::Has>());
     if (!analyticGradComputed)
     {
-      j_ = DDP_structures::Dynamics<float, DYNAMICS_T::STATE_DIM, DYNAMICS_T::CONTROL_DIM>::df(x, u);
+      j_ = PARENT_CLASS::df(x, u);
     }
     return j_;
   }

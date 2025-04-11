@@ -1,9 +1,9 @@
 #include <mppi/controllers/controller.cuh>
 
 #define CONTROLLER_TEMPLATE                                                                                            \
-  template <class DYN_T, class COST_T, class FB_T, class SAMPLING_T, int MAX_TIMESTEPS, int NUM_ROLLOUTS,              \
+  template <class DYN_T, class COST_T, class FB_T, class SAMPLING_T, int NUM_ROLLOUTS,              \
             class PARAMS_T>
-#define CONTROLLER Controller<DYN_T, COST_T, FB_T, SAMPLING_T, MAX_TIMESTEPS, NUM_ROLLOUTS, PARAMS_T>
+#define CONTROLLER Controller<DYN_T, COST_T, FB_T, SAMPLING_T, NUM_ROLLOUTS, PARAMS_T>
 
 CONTROLLER_TEMPLATE
 void CONTROLLER::deallocateCUDAMemory()
@@ -12,7 +12,7 @@ void CONTROLLER::deallocateCUDAMemory()
   {
     HANDLE_ERROR(cudaFree(initial_state_d_));
     HANDLE_ERROR(cudaFree(vis_initial_state_d_));
-    HANDLE_ERROR(cudaFree(control_d_));
+    // HANDLE_ERROR(cudaFree(control_d_));
     HANDLE_ERROR(cudaFree(output_d_));
     HANDLE_ERROR(cudaFree(trajectory_costs_d_));
     HANDLE_ERROR(cudaFree(cost_baseline_and_norm_d_));
@@ -80,7 +80,7 @@ void CONTROLLER::copySampledControlFromDevice(bool synchronize)
                                this->vis_stream_));
   HANDLE_ERROR(cudaMemcpyAsync(
       //  this->sampled_noise_d_,
-      this->sampler_->getVisControlSample(0, 0, 0), this->control_d_,
+      this->sampler_->getVisControlSample(0, 0, 0), this->sampler_->getDeviceOptimalControlSequence(0),
       sizeof(float) * getNumTimesteps() * DYN_T::CONTROL_DIM, cudaMemcpyDeviceToDevice, this->vis_stream_));
 
   for (int i = 1; i < num_sampled_trajectories; i++)
@@ -207,31 +207,31 @@ void CONTROLLER::setSeedCUDARandomNumberGen(unsigned seed)
 }
 
 CONTROLLER_TEMPLATE
-void CONTROLLER::allocateCUDAMemoryHelper(int nominal_size, bool allocate_double_noise)
+void CONTROLLER::allocateCUDAMemoryHelper(const int num_systems)
 {
-  if (nominal_size < 0)
+  if (num_systems <= 0)
   {
-    nominal_size = 1;
-    std::cerr << "nominal size cannot be below 0 when allocateCudaMemoryHelper is called" << std::endl;
+    this->logger_->error("Number of systems cannot be below 1 when allocateCUDAMemoryHelper is called");
     std::exit(-1);
   }
-  else
+  // TODO: Check if control_d_ is even used anymore
+  if (CUDA_mem_init_)
   {
-    // increment by 1 since actual is not included
-    ++nominal_size;
+    HANDLE_ERROR(cudaFree(initial_state_d_));
+    HANDLE_ERROR(cudaFree(vis_initial_state_d_));
+    // HANDLE_ERROR(cudaFree(control_d_));
+    HANDLE_ERROR(cudaFree(output_d_));
+    HANDLE_ERROR(cudaFree(trajectory_costs_d_));
+    HANDLE_ERROR(cudaFree(cost_baseline_and_norm_d_));
   }
-  HANDLE_ERROR(cudaMalloc((void**)&initial_state_d_, sizeof(float) * DYN_T::STATE_DIM * nominal_size));
-  HANDLE_ERROR(cudaMalloc((void**)&vis_initial_state_d_, sizeof(float) * DYN_T::STATE_DIM * nominal_size));
-  HANDLE_ERROR(cudaMalloc((void**)&control_d_, sizeof(float) * DYN_T::CONTROL_DIM * MAX_TIMESTEPS * nominal_size));
+  HANDLE_ERROR(cudaMalloc((void**)&initial_state_d_, sizeof(float) * DYN_T::STATE_DIM * num_systems));
+  HANDLE_ERROR(cudaMalloc((void**)&vis_initial_state_d_, sizeof(float) * DYN_T::STATE_DIM * num_systems));
+  // HANDLE_ERROR(cudaMalloc((void**)&control_d_, sizeof(float) * DYN_T::CONTROL_DIM * getNumTimesteps() * num_systems));
   HANDLE_ERROR(
-      cudaMalloc((void**)&output_d_, sizeof(float) * DYN_T::OUTPUT_DIM * MAX_TIMESTEPS * NUM_ROLLOUTS * nominal_size));
-  HANDLE_ERROR(cudaMalloc((void**)&trajectory_costs_d_, sizeof(float) * NUM_ROLLOUTS * nominal_size));
-  // HANDLE_ERROR(cudaMalloc((void**)&control_std_dev_d_, sizeof(float) * DYN_T::CONTROL_DIM));
-  // HANDLE_ERROR(cudaMalloc((void**)&control_noise_d_, sizeof(float) * DYN_T::CONTROL_DIM * MAX_TIMESTEPS *
-  // NUM_ROLLOUTS *
-  //                                                        (allocate_double_noise ? nominal_size : 1)));
-  HANDLE_ERROR(cudaMalloc((void**)&cost_baseline_and_norm_d_, sizeof(float2) * nominal_size));
-  cost_baseline_and_norm_.resize(nominal_size, make_float2(0.0, 0.0));
+      cudaMalloc((void**)&output_d_, sizeof(float) * DYN_T::OUTPUT_DIM * getNumTimesteps() * NUM_ROLLOUTS * num_systems));
+  HANDLE_ERROR(cudaMalloc((void**)&trajectory_costs_d_, sizeof(float) * NUM_ROLLOUTS * num_systems));
+  HANDLE_ERROR(cudaMalloc((void**)&cost_baseline_and_norm_d_, sizeof(float2) * num_systems));
+  cost_baseline_and_norm_.resize(num_systems, make_float2(0.0, 0.0));
   CUDA_mem_init_ = true;
 }
 
@@ -242,15 +242,15 @@ void CONTROLLER::resizeSampledControlTrajectories(float perc, int multiplier, in
 
   if (sampled_states_CUDA_mem_init_)
   {
-    cudaFree(sampled_outputs_d_);
+    HANDLE_ERROR(cudaFree(sampled_outputs_d_));
     // cudaFree(sampled_noise_d_);
-    cudaFree(sampled_costs_d_);
-    cudaFree(sampled_crash_status_d_);
+    HANDLE_ERROR(cudaFree(sampled_costs_d_));
+    HANDLE_ERROR(cudaFree(sampled_crash_status_d_));
     sampled_states_CUDA_mem_init_ = false;
   }
-  sampled_trajectories_.resize(num_sampled_trajectories * multiplier, output_trajectory::Zero());
-  sampled_costs_.resize(num_sampled_trajectories * multiplier, cost_trajectory::Zero());
-  sampled_crash_status_.resize(num_sampled_trajectories * multiplier, crash_status_trajectory::Zero());
+  sampled_trajectories_.resize(num_sampled_trajectories * multiplier, output_trajectory::Zero(DYN_T::OUTPUT_DIM, getNumTimesteps()));
+  sampled_costs_.resize(num_sampled_trajectories * multiplier, cost_trajectory::Zero(1, getNumTimesteps() + 1));
+  sampled_crash_status_.resize(num_sampled_trajectories * multiplier, crash_status_trajectory::Zero(1, getNumTimesteps()));
   sampler_->setNumVisRollouts(num_sampled_trajectories);
   if (num_sampled_trajectories <= 0)
   {
@@ -258,15 +258,12 @@ void CONTROLLER::resizeSampledControlTrajectories(float perc, int multiplier, in
   }
 
   HANDLE_ERROR(cudaMalloc((void**)&sampled_outputs_d_,
-                          sizeof(float) * DYN_T::OUTPUT_DIM * MAX_TIMESTEPS * num_sampled_trajectories * multiplier));
-  // HANDLE_ERROR(cudaMalloc((void**)&sampled_noise_d_,
-  //                         sizeof(float) * DYN_T::CONTROL_DIM * MAX_TIMESTEPS * num_sampled_trajectories *
-  //                         multiplier));
+                          sizeof(float) * DYN_T::OUTPUT_DIM * getNumTimesteps() * num_sampled_trajectories * multiplier));
   // +1 for terminal cost
   HANDLE_ERROR(cudaMalloc((void**)&sampled_costs_d_,
-                          sizeof(float) * (MAX_TIMESTEPS + 1) * num_sampled_trajectories * multiplier));
+                          sizeof(float) * (getNumTimesteps() + 1) * num_sampled_trajectories * multiplier));
   HANDLE_ERROR(cudaMalloc((void**)&sampled_crash_status_d_,
-                          sizeof(int) * MAX_TIMESTEPS * num_sampled_trajectories * multiplier));
+                          sizeof(int) * getNumTimesteps() * num_sampled_trajectories * multiplier));
   sampled_states_CUDA_mem_init_ = true;
 }
 

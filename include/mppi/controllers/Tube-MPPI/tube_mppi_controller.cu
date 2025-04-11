@@ -2,10 +2,10 @@
 #include <mppi/core/mppi_common.cuh>
 
 #define TUBE_MPPI_TEMPLATE                                                                                             \
-  template <class DYN_T, class COST_T, class FB_T, int MAX_TIMESTEPS, int NUM_ROLLOUTS, class SAMPLING_T,              \
+  template <class DYN_T, class COST_T, class FB_T, int NUM_ROLLOUTS, class SAMPLING_T,              \
             class PARAMS_T>
 
-#define TubeMPPI TubeMPPIController<DYN_T, COST_T, FB_T, MAX_TIMESTEPS, NUM_ROLLOUTS, SAMPLING_T, PARAMS_T>
+#define TubeMPPI TubeMPPIController<DYN_T, COST_T, FB_T, NUM_ROLLOUTS, SAMPLING_T, PARAMS_T>
 
 TUBE_MPPI_TEMPLATE
 TubeMPPI::TubeMPPIController(DYN_T* model, COST_T* cost, FB_T* fb_controller, SAMPLING_T* sampler, float dt,
@@ -20,6 +20,11 @@ TubeMPPI::TubeMPPIController(DYN_T* model, COST_T* cost, FB_T* fb_controller, SA
   this->params_.dynamics_rollout_dim_.z = max(2, this->params_.dynamics_rollout_dim_.z);
   this->params_.cost_rollout_dim_.z = max(2, this->params_.cost_rollout_dim_.z);
   this->sampler_->setNumDistributions(2);
+
+  // Zero the nominal trajectories
+  nominal_state_trajectory_.setZero();
+  nominal_control_trajectory_.setZero();
+  trajectory_costs_nominal_.setZero();
 
   // Allocate CUDA memory for the controller
   allocateCUDAMemory();
@@ -41,6 +46,11 @@ TubeMPPI::TubeMPPIController(DYN_T* model, COST_T* cost, FB_T* fb_controller, SA
   this->params_.dynamics_rollout_dim_.z = max(2, this->params_.dynamics_rollout_dim_.z);
   this->params_.cost_rollout_dim_.z = max(2, this->params_.cost_rollout_dim_.z);
   this->sampler_->setNumDistributions(2);
+
+  // Zero the nominal trajectories
+  nominal_state_trajectory_.setZero();
+  nominal_control_trajectory_.setZero();
+  trajectory_costs_nominal_.setZero();
 
   // Allocate CUDA memory for the controller
   allocateCUDAMemory();
@@ -152,6 +162,17 @@ void TubeMPPI::chooseAppropriateKernel()
   this->logger_->info("Choosing %s kernel based on split taking %f ms and single taking %f ms after %d iterations\n",
                      kernel_choice.c_str(), split_kernel_time_ms, single_kernel_time_ms,
                      this->getNumKernelEvaluations());
+}
+
+
+TUBE_MPPI_TEMPLATE
+void TubeMPPI::setNumTimesteps(const int num_timesteps)
+{
+  PARENT_CLASS::setNumTimesteps(num_timesteps);
+  // Set up nominal trajectories
+  PARENT_CLASS::resizeTimeTrajectory(nominal_control_trajectory_, num_timesteps);
+  PARENT_CLASS::resizeTimeTrajectory(nominal_state_trajectory_, num_timesteps);
+  resetCandidateCudaMem();
 }
 
 TUBE_MPPI_TEMPLATE
@@ -308,7 +329,7 @@ void TubeMPPI::copyControlToDevice(bool synchronize)
 TUBE_MPPI_TEMPLATE
 void TubeMPPI::allocateCUDAMemory()
 {
-  PARENT_CLASS::allocateCUDAMemoryHelper(1);
+  PARENT_CLASS::allocateCUDAMemoryHelper(2);
 }
 
 TUBE_MPPI_TEMPLATE

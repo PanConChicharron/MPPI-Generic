@@ -42,8 +42,8 @@
 // Needed for list of candidate states
 #include <mppi/ddp/util.h>
 
-template <int S_DIM, int C_DIM, int MAX_TIMESTEPS>
-struct RobustMPPIParams : public ControllerParams<S_DIM, C_DIM, MAX_TIMESTEPS>
+template <int S_DIM, int C_DIM>
+struct RobustMPPIParams : public ControllerParams<S_DIM, C_DIM>
 {
   float value_function_threshold_ = 1000.0;
   int optimization_stride_ = 1;
@@ -52,19 +52,19 @@ struct RobustMPPIParams : public ControllerParams<S_DIM, C_DIM, MAX_TIMESTEPS>
   dim3 eval_dyn_kernel_dim_;
 };
 
-// template <class DYN_T, class COST_T, class FB_T, int MAX_TIMESTEPS, int NUM_ROLLOUTS = 2560, int BDIM_X = 64,
-//           int BDIM_Y = 1, class PARAMS_T = RobustMPPIParams<DYN_T::STATE_DIM, DYN_T::CONTROL_DIM, MAX_TIMESTEPS>,
+// template <class DYN_T, class COST_T, class FB_T, int NUM_ROLLOUTS = 2560, int BDIM_X = 64,
+//           int BDIM_Y = 1, class PARAMS_T = RobustMPPIParams<DYN_T::STATE_DIM, DYN_T::CONTROL_DIM>,
 //           int SAMPLES_PER_CONDITION_MULTIPLIER = 1>
-template <class DYN_T, class COST_T, class FB_T, int MAX_TIMESTEPS, int NUM_ROLLOUTS = 2560,
+template <class DYN_T, class COST_T, class FB_T, int NUM_ROLLOUTS = 2560,
           class SAMPLING_T = ::mppi::sampling_distributions::GaussianDistribution<typename DYN_T::DYN_PARAMS_T>,
-          class PARAMS_T = RobustMPPIParams<DYN_T::STATE_DIM, DYN_T::CONTROL_DIM, MAX_TIMESTEPS>>
-class RobustMPPIController : public Controller<DYN_T, COST_T, FB_T, SAMPLING_T, MAX_TIMESTEPS, NUM_ROLLOUTS, PARAMS_T>
+          class PARAMS_T = RobustMPPIParams<DYN_T::STATE_DIM, DYN_T::CONTROL_DIM>>
+class RobustMPPIController : public Controller<DYN_T, COST_T, FB_T, SAMPLING_T, NUM_ROLLOUTS, PARAMS_T>
 {
 public:
   /**
    * Set up useful types
    */
-  typedef Controller<DYN_T, COST_T, FB_T, SAMPLING_T, MAX_TIMESTEPS, NUM_ROLLOUTS, PARAMS_T> PARENT_CLASS;
+  typedef Controller<DYN_T, COST_T, FB_T, SAMPLING_T, NUM_ROLLOUTS, PARAMS_T> PARENT_CLASS;
 
   using control_array = typename PARENT_CLASS::control_array;
   using control_trajectory = typename PARENT_CLASS::control_trajectory;
@@ -102,8 +102,8 @@ public:
    * TODO Finish this description
    */
   RobustMPPIController(DYN_T* model, COST_T* cost, FB_T* fb_controller, SAMPLING_T* sampler, float dt, int max_iter,
-                       float lambda, float alpha, float value_function_threshold, int num_timesteps = MAX_TIMESTEPS,
-                       const Eigen::Ref<const control_trajectory>& init_control_traj = control_trajectory::Zero(),
+                       float lambda, float alpha, float value_function_threshold, int num_timesteps,
+                       const Eigen::Ref<const control_trajectory>& init_control_traj = control_trajectory::Zero(DYN_T::CONTROL_DIM, 1),
                        int num_candidate_nominal_states = 9, int optimization_stride = 1,
                        cudaStream_t stream = nullptr);
 
@@ -240,6 +240,8 @@ public:
 
   void setParams(const PARAMS_T& p);
 
+  void setNumTimesteps(const int num_timesteps) override;
+
   void calculateSampledStateTrajectories() override;
 
   void chooseAppropriateKernel() override;
@@ -261,9 +263,9 @@ protected:
   float nominal_free_energy_modified_variance_ = 0;
 
   // Storage classes
-  control_trajectory nominal_control_trajectory_ = control_trajectory::Zero();
-  state_trajectory nominal_state_trajectory_ = state_trajectory::Zero();
-  sampled_cost_traj trajectory_costs_nominal_ = sampled_cost_traj::Zero();
+  control_trajectory nominal_control_trajectory_;
+  state_trajectory nominal_state_trajectory_;
+  sampled_cost_traj trajectory_costs_nominal_;
 
   // Make the control history size flexible, related to issue #30
   Eigen::Matrix<float, DYN_T::CONTROL_DIM, 2> nominal_control_history_;  // History used for nominal_state IS

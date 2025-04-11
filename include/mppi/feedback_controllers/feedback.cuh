@@ -132,7 +132,7 @@ protected:
  * Write the feedback controller to use the GPUFeedback_act as thee GPU_FEEDBACK_T template option
  * It will then automatically create the right pointer
  */
-template <class GPU_FB_T, class PARAMS_T, int NUM_TIMESTEPS>
+template <class GPU_FB_T, class PARAMS_T>
 class FeedbackController
 {
 public:
@@ -142,19 +142,20 @@ public:
   typedef PARAMS_T TEMPLATED_PARAMS;
   typedef GPU_FB_T TEMPLATED_GPU_FEEDBACK;
   typedef typename GPU_FB_T::FEEDBACK_STATE_T TEMPLATED_FEEDBACK_STATE;
-  static const int FB_TIMESTEPS = NUM_TIMESTEPS;
+  // static const int FB_TIMESTEPS = NUM_TIMESTEPS;
 
   using state_array = typename DYN_T::state_array;
   using control_array = typename DYN_T::control_array;
   typedef Eigen::Matrix<float, DYN_T::CONTROL_DIM,
-                        NUM_TIMESTEPS> control_trajectory;  // A control trajectory
+                        Eigen::Dynamic> control_trajectory;  // A control trajectory
   typedef Eigen::Matrix<float, DYN_T::STATE_DIM,
-                        NUM_TIMESTEPS> state_trajectory;  // A state trajectory
+                        Eigen::Dynamic> state_trajectory;  // A state trajectory
 
   // Constructors and Generators
-  FeedbackController(float dt = 0.01, int num_timesteps = NUM_TIMESTEPS, cudaStream_t stream = 0)
-    : dt_(dt), num_timesteps_(num_timesteps)
+  FeedbackController(float dt = 0.01, int num_timesteps = 1, cudaStream_t stream = 0)
   {
+    setDt(dt);
+    setNumTimesteps(num_timesteps);
     gpu_controller_ = std::make_shared<GPU_FB_T>(stream);
     auto logger = std::make_shared<mppi::util::MPPILogger>();
     setLogger(logger);
@@ -272,13 +273,23 @@ public:
     this->gpu_controller_->setFeedbackState(gpu_fb_state);
   }
 
-  float getDt()
+  float getDt() const
   {
     return dt_;
   }
-  void setDt(float dt)
+  void setDt(const float dt)
   {
     dt_ = dt;
+  }
+
+  void getNumTimesteps() const
+  {
+    return num_timesteps_;
+  }
+
+  void setNumTimesteps(const int num_timesteps)
+  {
+    num_timesteps_ = num_timesteps;
   }
 
   __host__ void setLogger(const mppi::util::MPPILoggerPtr& logger)
