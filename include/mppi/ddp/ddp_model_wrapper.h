@@ -43,13 +43,13 @@ struct ModelWrapperDDP : public DDP_structures::Dynamics<float, DYNAMICS_T::STAT
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
   using Scalar = float;
   using PARENT_CLASS = typename DDP_structures::Dynamics<Scalar, DYNAMICS_T::STATE_DIM, DYNAMICS_T::CONTROL_DIM>;
-  using State = PARENT_CLASS::State;
-  using Control = PARENT_CLASS::Control;
-  using Jacobian = PARENT_CLASS::Jacobian;
+  using State = typename PARENT_CLASS::State;
+  using Control = typename PARENT_CLASS::Control;
+  using Jacobian = typename PARENT_CLASS::Jacobian;
   using StateTrajectory =
-      PARENT_CLASS::StateTrajectory;
+      typename PARENT_CLASS::StateTrajectory;
   using ControlTrajectory =
-      PARENT_CLASS::ControlTrajectory;
+      typename PARENT_CLASS::ControlTrajectory;
 
   State state;
   Control control;

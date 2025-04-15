@@ -282,7 +282,7 @@ public:
     dt_ = dt;
   }
 
-  void getNumTimesteps() const
+  int getNumTimesteps() const
   {
     return num_timesteps_;
   }
@@ -317,7 +317,7 @@ public:
 protected:
   std::shared_ptr<GPU_FB_T> gpu_controller_;
   float dt_;
-  int num_timesteps_;
+  int num_timesteps_ = 0;
   PARAMS_T params_;
   mppi::util::MPPILoggerPtr logger_ = nullptr;
 };

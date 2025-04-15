@@ -6,22 +6,41 @@
  */
 
 template <class DYN_T>
-DDPFeedbackState<DYN_T>::DDPFeedbackState(int num_timesteps, cudaStream_t stream = 0)
+DDPFeedbackState<DYN_T>::DDPFeedbackState(int num_timesteps, cudaStream_t stream)
 {
   setNumTimesteps(num_timesteps);
   setCUDAStream(stream);
 }
 
 template <class DYN_T>
-void DDPFeedbackState<DYN_T>::setNumTimesteps(const int timesteps)
+DDPFeedbackState<DYN_T>::~DDPFeedbackState()
 {
-  bool larger_array_needed = num_timesteps > num_timesteps_;
-  num_timesteps_ = num_timesteps;
+  delete[] fb_gain_traj_;
+  fb_gain_traj_ = nullptr;
+}
+
+template <class DYN_T>
+void DDPFeedbackState<DYN_T>::setNumTimesteps(const int num_timesteps)
+{
+  int prev_timesteps = this->num_timesteps_;
+  bool larger_array_needed = num_timesteps > this->num_timesteps_;
+  this->num_timesteps_ = num_timesteps;
   if (larger_array_needed)
   {
     allocateCUDAMemory();
+
+    // float* fb_gain_traj_new = new float[size()](); // initialize to zero
+    if (fb_gain_traj_ != nullptr)
+    {
+      // for (int i = 0; i < prev_timesteps i++)
+      // {
+      //   fb_gain_traj_new[i] = fb_gain_traj_[i];
+      // }
+      delete[] fb_gain_traj_;
+    }
+    fb_gain_traj_ = new float[size()](); // Initialize to zero
+    // fb_gain_traj_ = fb_gain_traj_new;
   }
-  return true;
  }
 
 template <class DYN_T>
@@ -31,7 +50,7 @@ void DDPFeedbackState<DYN_T>::setCUDAStream(const cudaStream_t stream)
 }
 
 template <class DYN_T>
-__host__ __device__ const int DDPFeedbackState<DYN_T>::getNumTimesteps() const
+__host__ __device__ int DDPFeedbackState<DYN_T>::getNumTimesteps() const
 {
   return num_timesteps_;
 }
@@ -114,38 +133,38 @@ DeviceDDPImpl<GPU_FB_T, DYN_T>::DeviceDDPImpl(int num_timesteps, cudaStream_t st
   : PARENT_CLASS(stream)
 {
   this->setNumTimesteps(num_timesteps);
-  this->state_->setCUDAStream(stream);
+  this->state_.setCUDAStream(stream);
 }
 
 template <class GPU_FB_T, class DYN_T>
 void DeviceDDPImpl<GPU_FB_T, DYN_T>::allocateCUDAMemory()
 {
-  // this->state_->allocateCUDAMemory is not needed as it is done within setNumTimesteps()
+  // this->state_.allocateCUDAMemory is not needed as it is done within setNumTimesteps()
 }
 
 template <class GPU_FB_T, class DYN_T>
 void DeviceDDPImpl<GPU_FB_T, DYN_T>::copyToDevice(bool synchronize)
 {
-  this->state_->copyToDevice(false); // Copy gains to GPU first
+  this->state_.copyToDevice(false); // Copy gains to GPU first
   PARENT_CLASS::copyToDevice(synchronize); // Copy num_timesteps and fb_gain_ptrs to GPU
 }
 
 template <class GPU_FB_T, class DYN_T>
 void DeviceDDPImpl<GPU_FB_T, DYN_T>::deallocateCUDAMemory()
 {
-  this->state_->deallocateCUDAMemory();
+  this->state_.deallocateCUDAMemory();
 }
 
 template <class GPU_FB_T, class DYN_T>
 void DeviceDDPImpl<GPU_FB_T, DYN_T>::setNumTimesteps(const int num_timesteps)
 {
-  this->state_->setNumTimesteps(num_timesteps);
+  this->state_.setNumTimesteps(num_timesteps);
 }
 
 template <class GPU_FB_T, class DYN_T>
-__host__ __device__ void DeviceDDPImpl<GPU_FB_T, DYN_T>::getNumTimesteps() const
+__host__ __device__ int DeviceDDPImpl<GPU_FB_T, DYN_T>::getNumTimesteps() const
 {
-  return this->state_->getNumTimesteps();
+  return this->state_.getNumTimesteps();
 }
 
 

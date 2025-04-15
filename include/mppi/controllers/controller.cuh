@@ -118,6 +118,9 @@ public:
     cost_ = cost;
     fb_controller_ = fb_controller;
     sampler_ = sampler;
+    auto logger = std::make_shared<mppi::util::MPPILogger>();
+    setLogger(logger);
+
     sampler_->setNumRollouts(NUM_ROLLOUTS);
     sampler_->setNumDistributions(1);
     TEMPLATED_PARAMS params;
@@ -126,12 +129,22 @@ public:
     params.lambda_ = lambda;
     params.alpha_ = alpha;
     params.num_timesteps_ = num_timesteps;
-    params.init_control_traj_ = init_control_traj;
     setNumTimesteps(params.num_timesteps_);
+
+    // Set initial control in temp params
+    resizeTimeTrajectory<DYN_T::CONTROL_DIM>(params.init_control_traj_, num_timesteps);
+    params.init_control_traj_.block(0, 0, DYN_T::CONTROL_DIM, init_control_traj.cols()) = init_control_traj;
+    if (init_control_traj.cols() < getNumTimesteps())
+    { // Copy last control value to fill time horizon
+      for (int i = init_control_traj.cols(); i < getNumTimesteps(); i++)
+      {
+        params.init_control_traj_.col(i) = init_control_traj.col(init_control_traj.cols() - 1);
+      }
+    }
     setTrajectoriesToZero();
     setParams(params);
 
-    control_ = init_control_traj;
+    control_ = params.init_control_traj_;
     control_history_ = Eigen::Matrix<float, DYN_T::CONTROL_DIM, 2>::Zero();
 
     // Bind the model and control to the given stream
@@ -140,9 +153,6 @@ public:
     HANDLE_ERROR(cudaStreamCreate(&vis_stream_));
 
     GPUSetup();
-
-    auto logger = std::make_shared<mppi::util::MPPILogger>();
-    setLogger(logger);
 
     /**
      * When implementing your own version make sure to write your own allocateCUDAMemory and call it from the
@@ -160,6 +170,9 @@ public:
     cost_ = cost;
     fb_controller_ = fb_controller;
     sampler_ = sampler;
+    auto logger = std::make_shared<mppi::util::MPPILogger>();
+    setLogger(logger);
+
     sampler_->setNumRollouts(NUM_ROLLOUTS);
     sampler_->setNumDistributions(1);
     setNumTimesteps(params_.num_timesteps_);
@@ -174,9 +187,6 @@ public:
     HANDLE_ERROR(cudaStreamCreate(&vis_stream_));
 
     GPUSetup();
-
-    auto logger = std::make_shared<mppi::util::MPPILogger>();
-    setLogger(logger);
 
     /**
      * When implementing your own version make sure to write your own allocateCUDAMemory and call it from the
@@ -667,49 +677,49 @@ public:
   {
     if (num_timesteps <= 0)
     {
-      this->logger_-error("You must give a number of timesteps greater than 0. Attempted timestep change: %d\n", num_timesteps);
+      this->logger_->error("You must give a number of timesteps greater than 0. Attempted timestep change: %d\n", num_timesteps);
       return;
     }
-    bool larger_array_needed = num_timesteps > num_timesteps_;
-    int prev_size = num_timesteps_;
-    num_timesteps_ = num_timesteps;
-    resizeTimeTrajectory(control_, num_timesteps);
-    resizeTimeTrajectory(state_, num_timesteps);
-    resizeTimeTrajectory(output_, num_timesteps);
-    resizeTimeTrajectory(propagated_feedback_state_trajectory_, num_timesteps);
-    resizeTimeTrajectory(params.init_control_traj_, num_timesteps);
+    bool larger_array_needed = num_timesteps > params_.num_timesteps_;
+    int prev_size = params_.num_timesteps_;
+    params_.num_timesteps_ = num_timesteps;
+    resizeTimeTrajectory<DYN_T::CONTROL_DIM>(control_, num_timesteps);
+    resizeTimeTrajectory<DYN_T::STATE_DIM>(state_, num_timesteps);
+    resizeTimeTrajectory<DYN_T::OUTPUT_DIM>(output_, num_timesteps);
+    resizeTimeTrajectory<DYN_T::STATE_DIM>(propagated_feedback_state_trajectory_, num_timesteps);
+    resizeTimeTrajectory<DYN_T::CONTROL_DIM>(params_.init_control_traj_, num_timesteps);
     for (std::size_t i = 0; i < sampled_trajectories_.size(); i++)
     {
-      resizeTimeTrajectory(sampled_trajectories_[i], num_timesteps);
-      resizeTimeTrajectory(sampled_costs_[i], num_timesteps + 1);
-      resizeTimeTrajectory(sampled_crash_status_[i], num_timesteps);
+      resizeTimeTrajectory<DYN_T::OUTPUT_DIM>(sampled_trajectories_[i], num_timesteps);
+      resizeTimeTrajectory<1>(sampled_costs_[i], num_timesteps + 1);
+      resizeTimeTrajectory<1, int>(sampled_crash_status_[i], num_timesteps);
     }
     if (larger_array_needed)
     {
       resizeSampledControlTrajectories(perc_sampled_control_trajectories_, sample_multiplier_,
-        num_top_control_trajectories_);
+                                       num_top_control_trajectories_);
       for (int i = prev_size; i < num_timesteps; i++)
       {
-        params_.init_control_traj_.col(i) = params.init_control_traj_.col(prev_size - 1);
+        params_.init_control_traj_.col(i) = params_.init_control_traj_.col(prev_size - 1);
       }
     }
-    params_.num_timesteps_ = num_timesteps;
     sampler_->setNumTimesteps(params_.num_timesteps_);
-    fb_controller_->setNumTimesteps(num_timesteps);
-    // TODO: also resize cuda arrays
+    fb_controller_->setNumTimesteps(params_.num_timesteps_);
     if (CUDA_mem_init_)
     {
       allocateCUDAMemory();
     }
   }
 
-  void resizeTimeTrajectory(Eigen::Ref<Eigen::MatrixXf> trajectory, int num_timesteps = -1)
+  template <int DIM = 1, class T = float>
+  void resizeTimeTrajectory(Eigen::Matrix<T, DIM, Eigen::Dynamic>& trajectory, int num_timesteps = -1)
   {
     if (num_timesteps == -1)
     {
       num_timesteps = getNumTimesteps();
     }
-    trajectory.conservativeResize(Eigen::NoChange_t, num_timesteps);
+    Eigen::NoChange_t same_row;
+    trajectory.conservativeResize(same_row, num_timesteps);
   }
 
   void setTrajectoriesToZero()
@@ -729,8 +739,8 @@ public:
       for (std::size_t j = 0; j < sampled_trajectories_.size(); j++)
       {
         sampled_trajectories_[j].col(i) = output_array::Zero();
-        sampled_costs_[j].col(i) = 0.0f;
-        sampled_crash_status_[j].col(i) = 0;
+        sampled_costs_[j](0, i) = 0.0f;
+        sampled_crash_status_[j](0, i) = 0;
       }
     }
   }
@@ -1040,7 +1050,7 @@ protected:
   std::vector<crash_status_trajectory> sampled_crash_status_;
 
   // Propagated real state trajectory
-  state_trajectory propagated_feedback_state_trajectory_ = state_trajectory::Zero();
+  state_trajectory propagated_feedback_state_trajectory_;
 
   // tracking controller variables
   bool enable_feedback_ = false;

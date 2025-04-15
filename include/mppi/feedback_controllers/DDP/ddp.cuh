@@ -38,6 +38,8 @@ struct DDPFeedbackState : GPUState
   cudaStream_t stream_ = 0;
   DDPFeedbackState(int num_timesteps = 1, cudaStream_t stream = 0);
 
+  ~DDPFeedbackState();
+
 
   /**
    * Methods
@@ -49,7 +51,7 @@ struct DDPFeedbackState : GPUState
 
   __host__ void deallocateCUDAMemory();
 
-  __host__ __device__ const int getNumTimesteps() const;
+  __host__ __device__ int getNumTimesteps() const;
 
   __host__ __device__ float* getFeedbackGainPtr() const;
 
@@ -87,7 +89,7 @@ public:
   // static const int SHARED_MEM_REQUEST_BLK_BYTES = DYN_T::CONTROL_DIM * DYN_T::STATE_DIM;
   DeviceDDPImpl(int num_timesteps, cudaStream_t stream = 0);
   DeviceDDPImpl(cudaStream_t stream = 0)
-    : PARENT_CLASS(stream){this->state_->setNumTimesteps(1);};
+    : PARENT_CLASS(stream){this->state_.setNumTimesteps(1);};
 
   void allocateCUDAMemory();
   void deallocateCUDAMemory();
@@ -95,7 +97,7 @@ public:
 
   void setNumTimesteps(const int num_timesteps);
 
-  __host__ __device__ void getNumTimesteps() const;
+  __host__ __device__ int getNumTimesteps() const;
 
   __device__ void k(const float* __restrict__ x_act, const float* __restrict__  x_goal, const int t, float* __restrict__  theta, float* __restrict__  control_output);
 };
@@ -149,7 +151,7 @@ public:
   control_array control_max_;
   DYN_T* model_;
 
-  DDPFeedback(DYN_T* model, float dt, int num_timesteps = NUM_TIMESTEPS, cudaStream_t stream = 0);
+  DDPFeedback(DYN_T* model, float dt, int num_timesteps = 1, cudaStream_t stream = 0);
 
   void setParams(const DDPParams<DYN_T>& params) override;
 
