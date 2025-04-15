@@ -29,7 +29,7 @@ using SCost = DoubleIntegratorCircleCost;
 using RCost = DoubleIntegratorRobustCost;
 const int num_timesteps = 50;  // Optimization time horizon
 const int total_time_horizon = 5000;
-using Feedback = DDPFeedback<Dyn, num_timesteps>;
+using Feedback = DDPFeedback<Dyn>;
 using Sampler = mppi::sampling_distributions::GaussianDistribution<Dyn::DYN_PARAMS_T>;
 
 // Problem setup
@@ -87,11 +87,11 @@ void runVanilla(const Eigen::Ref<const Eigen::Matrix<float, Dyn::STATE_DIM, tota
   auto fb_params = fb_controller.getParams();
   fb_params.Q.diagonal() << 500, 500, 100, 100;
   fb_controller.setParams(fb_params);
-  auto controller = VanillaMPPIController<Dyn, SCost, Feedback, num_timesteps, 1024, Sampler>(
-      &model, &cost, &fb_controller, &sampler, dt, max_iter, lambda, alpha);
+  auto controller = VanillaMPPIController<Dyn, SCost, Feedback, 1024, Sampler>(
+      &model, &cost, &fb_controller, &sampler, dt, max_iter, lambda, alpha, num_timesteps);
   auto controller_params = controller.getParams();
   controller_params.dynamics_rollout_dim_ = dim3(64, 1, 1);
-  controller_params.cost_rollout_dim_ = dim3(64, 1, 1);
+  controller_params.cost_rollout_dim_ = dim3(min(64, num_timesteps), 1, 1);
   controller.setParams(controller_params);
   controller.initFeedback();
 
@@ -170,11 +170,11 @@ void runVanillaLarge(const Eigen::Ref<const Eigen::Matrix<float, Dyn::STATE_DIM,
   auto fb_params = fb_controller.getParams();
   fb_params.Q.diagonal() << 500, 500, 100, 100;
   fb_controller.setParams(fb_params);
-  auto controller = VanillaMPPIController<Dyn, SCost, Feedback, num_timesteps, 1024, Sampler>(
-      &model, &cost, &fb_controller, &sampler, dt, max_iter, lambda, alpha);
+  auto controller = VanillaMPPIController<Dyn, SCost, Feedback, 1024, Sampler>(
+      &model, &cost, &fb_controller, &sampler, dt, max_iter, lambda, alpha, num_timesteps);
   auto controller_params = controller.getParams();
   controller_params.dynamics_rollout_dim_ = dim3(64, 1, 1);
-  controller_params.cost_rollout_dim_ = dim3(64, 1, 1);
+  controller_params.cost_rollout_dim_ = dim3(min(64, num_timesteps), 1, 1);
   controller.setParams(controller_params);
   controller.initFeedback();
 
@@ -258,11 +258,11 @@ void runVanillaLargeRC(const Eigen::Ref<const Eigen::Matrix<float, Dyn::STATE_DI
   fb_params.Q.diagonal() << 500, 500, 100, 100;
   fb_controller.setParams(fb_params);
 
-  auto controller = VanillaMPPIController<Dyn, RCost, Feedback, num_timesteps, 1024, Sampler>(
-      &model, &cost, &fb_controller, &sampler, dt, max_iter, lambda, alpha);
+  auto controller = VanillaMPPIController<Dyn, RCost, Feedback, 1024, Sampler>(
+      &model, &cost, &fb_controller, &sampler, dt, max_iter, lambda, alpha, num_timesteps);
   auto controller_params = controller.getParams();
   controller_params.dynamics_rollout_dim_ = dim3(64, 1, 1);
-  controller_params.cost_rollout_dim_ = dim3(64, 1, 1);
+  controller_params.cost_rollout_dim_ = dim3(min(64, num_timesteps), 1, 1);
   controller.setParams(controller_params);
   controller.initFeedback();
 
@@ -343,11 +343,11 @@ void runTube(const Eigen::Ref<const Eigen::Matrix<float, Dyn::STATE_DIM, total_t
   auto fb_params = fb_controller.getParams();
   fb_params.Q.diagonal() << 500, 500, 100, 100;
   fb_controller.setParams(fb_params);
-  auto controller = TubeMPPIController<Dyn, SCost, Feedback, num_timesteps, 1024, Sampler>(
-      &model, &cost, &fb_controller, &sampler, dt, max_iter, lambda, alpha);
+  auto controller = TubeMPPIController<Dyn, SCost, Feedback, 1024, Sampler>(
+      &model, &cost, &fb_controller, &sampler, dt, max_iter, lambda, alpha, num_timesteps);
   auto controller_params = controller.getParams();
   controller_params.dynamics_rollout_dim_ = dim3(64, 1, 1);
-  controller_params.cost_rollout_dim_ = dim3(64, 1, 1);
+  controller_params.cost_rollout_dim_ = dim3(min(64, num_timesteps), 1, 1);
   controller.setParams(controller_params);
   controller.setNominalThreshold(20);
   // Start the loop
@@ -435,11 +435,11 @@ void runTubeRC(const Eigen::Ref<const Eigen::Matrix<float, Dyn::STATE_DIM, total
   auto fb_params = fb_controller.getParams();
   fb_params.Q.diagonal() << 500, 500, 100, 100;
   fb_controller.setParams(fb_params);
-  auto controller = TubeMPPIController<Dyn, RCost, Feedback, num_timesteps, 1024>(
-      &model, &cost, &fb_controller, &sampler, dt, max_iter, lambda, alpha);
+  auto controller = TubeMPPIController<Dyn, RCost, Feedback, 1024>(
+      &model, &cost, &fb_controller, &sampler, dt, max_iter, lambda, alpha, num_timesteps);
   auto controller_params = controller.getParams();
   controller_params.dynamics_rollout_dim_ = dim3(64, 1, 1);
-  controller_params.cost_rollout_dim_ = dim3(64, 1, 1);
+  controller_params.cost_rollout_dim_ = dim3(min(64, num_timesteps), 1, 1);
   controller.setParams(controller_params);
   controller.setNominalThreshold(2);
   // Start the loop
@@ -529,11 +529,11 @@ void runRobustSc(const Eigen::Ref<const Eigen::Matrix<float, Dyn::STATE_DIM, tot
   fb_controller.setParams(fb_params);
   // Value function threshold
   float value_function_threshold = 20.0;
-  auto controller = RobustMPPIController<Dyn, SCost, Feedback, num_timesteps, 1024, Sampler>(
-      &model, &cost, &fb_controller, &sampler, dt, max_iter, lambda, alpha, value_function_threshold);
+  auto controller = RobustMPPIController<Dyn, SCost, Feedback, 1024, Sampler>(
+      &model, &cost, &fb_controller, &sampler, dt, max_iter, lambda, alpha, value_function_threshold, num_timesteps);
   auto controller_params = controller.getParams();
   controller_params.dynamics_rollout_dim_ = dim3(64, 1, 1);
-  controller_params.cost_rollout_dim_ = dim3(64, 1, 1);
+  controller_params.cost_rollout_dim_ = dim3(min(64, num_timesteps), 1, 1);
   controller.setParams(controller_params);
 
   // Start the loop
@@ -641,11 +641,11 @@ void runRobustRc(const Eigen::Ref<const Eigen::Matrix<float, Dyn::STATE_DIM, tot
 
   // Value function threshold
   float value_function_threshold = 20.0;
-  auto controller = RobustMPPIController<Dyn, RCost, Feedback, num_timesteps, 1024, Sampler>(
-      &model, &cost, &fb_controller, &sampler, dt, max_iter, lambda, alpha, value_function_threshold);
+  auto controller = RobustMPPIController<Dyn, RCost, Feedback, 1024, Sampler>(
+      &model, &cost, &fb_controller, &sampler, dt, max_iter, lambda, alpha, value_function_threshold, num_timesteps);
   auto controller_params = controller.getParams();
   controller_params.dynamics_rollout_dim_ = dim3(64, 1, 1);
-  controller_params.cost_rollout_dim_ = dim3(64, 1, 1);
+  controller_params.cost_rollout_dim_ = dim3(min(64, num_timesteps), 1, 1);
   controller.setParams(controller_params);
 
   // Start the loop

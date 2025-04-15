@@ -41,11 +41,11 @@ int main(int argc, char** argv)
   auto sampler = new SAMPLER_T(sampler_params);
 
   // Feedback Controller
-  auto fb_controller = new DDPFeedback<CartpoleDynamics, num_timesteps>(model, dt);
+  auto fb_controller = new DDPFeedback<CartpoleDynamics>(model, dt);
 
   auto CartpoleController =
-      new VanillaMPPIController<CartpoleDynamics, CartpoleQuadraticCost, DDPFeedback<CartpoleDynamics, num_timesteps>,
-                                num_timesteps, 2048>(model, cost, fb_controller, sampler, dt, max_iter, lambda, alpha);
+      new VanillaMPPIController<CartpoleDynamics, CartpoleQuadraticCost, DDPFeedback<CartpoleDynamics>,
+                                2048>(model, cost, fb_controller, sampler, dt, max_iter, lambda, alpha, num_timesteps);
   auto controller_params = CartpoleController->getParams();
   controller_params.dynamics_rollout_dim_ = dim3(64, 4, 1);
   controller_params.cost_rollout_dim_ = dim3(64, 4, 1);

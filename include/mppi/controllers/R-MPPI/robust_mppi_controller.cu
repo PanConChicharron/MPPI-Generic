@@ -24,8 +24,8 @@ RobustMPPI::RobustMPPIController(DYN_T* model, COST_T* cost, FB_T* fb_controller
   this->sampler_->setNumDistributions(2);
 
   // Zero the nominal trajectories
+  setNumTimesteps(this->getNumTimesteps()); // Sets nominal trajectores to proper size
   nominal_state_trajectory_.setZero();
-  nominal_control_trajectory_.setZero();
   trajectory_costs_nominal_.setZero();
 
   // Zero the control history
@@ -42,7 +42,7 @@ RobustMPPI::RobustMPPIController(DYN_T* model, COST_T* cost, FB_T* fb_controller
   this->fb_controller_->initTrackingController();
 
   // Initialize the nominal control trajectory
-  nominal_control_trajectory_ = init_control_traj;
+  nominal_control_trajectory_ = this->params_.init_control_traj_;
 
   this->enable_feedback_ = true;
   chooseAppropriateKernel();
@@ -58,8 +58,8 @@ RobustMPPI::RobustMPPIController(DYN_T* model, COST_T* cost, FB_T* fb_controller
   this->sampler_->setNumDistributions(2);
 
   // Zero the nominal trajectories
+  setNumTimesteps(this->getNumTimesteps()); // Sets nominal trajectores to proper size
   nominal_state_trajectory_.setZero();
-  nominal_control_trajectory_.setZero();
   trajectory_costs_nominal_.setZero();
 
   // Zero the control history
@@ -91,7 +91,7 @@ RobustMPPI::~RobustMPPIController()
 ROBUST_MPPI_TEMPLATE
 void RobustMPPI::allocateCUDAMemory()
 {
-  PARENT_CLASS::allocateCUDAMemoryHelper(1);
+  PARENT_CLASS::allocateCUDAMemoryHelper(2);
 }
 
 ROBUST_MPPI_TEMPLATE

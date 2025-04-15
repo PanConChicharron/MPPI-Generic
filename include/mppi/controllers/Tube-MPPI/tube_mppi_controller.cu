@@ -14,7 +14,6 @@ TubeMPPI::TubeMPPIController(DYN_T* model, COST_T* cost, FB_T* fb_controller, SA
   : PARENT_CLASS(model, cost, fb_controller, sampler, dt, max_iter, lambda, alpha, num_timesteps, init_control_traj,
                  stream)
 {
-  nominal_control_trajectory_ = init_control_traj;
 
   // call rollout kernel with z = 2 since we have a nominal state
   this->params_.dynamics_rollout_dim_.z = max(2, this->params_.dynamics_rollout_dim_.z);
@@ -22,8 +21,10 @@ TubeMPPI::TubeMPPIController(DYN_T* model, COST_T* cost, FB_T* fb_controller, SA
   this->sampler_->setNumDistributions(2);
 
   // Zero the nominal trajectories
+  setNumTimesteps(this->getNumTimesteps()); // Sets nominal trajectores to proper size
   nominal_state_trajectory_.setZero();
-  nominal_control_trajectory_.setZero();
+  nominal_state_trajectory_.setZero();
+  nominal_control_trajectory_ = this->params_.init_control_traj_;
   trajectory_costs_nominal_.setZero();
 
   // Allocate CUDA memory for the controller
@@ -40,7 +41,6 @@ TubeMPPI::TubeMPPIController(DYN_T* model, COST_T* cost, FB_T* fb_controller, SA
                              cudaStream_t stream)
   : PARENT_CLASS(model, cost, fb_controller, sampler, params, stream)
 {
-  nominal_control_trajectory_ = this->params_.init_control_traj_;
 
   // call rollout kernel with z = 2 since we have a nominal state
   this->params_.dynamics_rollout_dim_.z = max(2, this->params_.dynamics_rollout_dim_.z);
@@ -48,8 +48,10 @@ TubeMPPI::TubeMPPIController(DYN_T* model, COST_T* cost, FB_T* fb_controller, SA
   this->sampler_->setNumDistributions(2);
 
   // Zero the nominal trajectories
+  setNumTimesteps(this->getNumTimesteps()); // Sets nominal trajectores to proper size
   nominal_state_trajectory_.setZero();
-  nominal_control_trajectory_.setZero();
+  nominal_state_trajectory_.setZero();
+  nominal_control_trajectory_ = this->params_.init_control_traj_;
   trajectory_costs_nominal_.setZero();
 
   // Allocate CUDA memory for the controller
@@ -172,7 +174,6 @@ void TubeMPPI::setNumTimesteps(const int num_timesteps)
   // Set up nominal trajectories
   PARENT_CLASS::resizeTimeTrajectory(nominal_control_trajectory_, num_timesteps);
   PARENT_CLASS::resizeTimeTrajectory(nominal_state_trajectory_, num_timesteps);
-  resetCandidateCudaMem();
 }
 
 TUBE_MPPI_TEMPLATE
