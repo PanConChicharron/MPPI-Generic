@@ -2,8 +2,7 @@
 #include <mppi/core/mppi_common.cuh>
 
 #define TUBE_MPPI_TEMPLATE                                                                                             \
-  template <class DYN_T, class COST_T, class FB_T, int NUM_ROLLOUTS, class SAMPLING_T,              \
-            class PARAMS_T>
+  template <class DYN_T, class COST_T, class FB_T, int NUM_ROLLOUTS, class SAMPLING_T, class PARAMS_T>
 
 #define TubeMPPI TubeMPPIController<DYN_T, COST_T, FB_T, NUM_ROLLOUTS, SAMPLING_T, PARAMS_T>
 
@@ -14,14 +13,13 @@ TubeMPPI::TubeMPPIController(DYN_T* model, COST_T* cost, FB_T* fb_controller, SA
   : PARENT_CLASS(model, cost, fb_controller, sampler, dt, max_iter, lambda, alpha, num_timesteps, init_control_traj,
                  stream)
 {
-
   // call rollout kernel with z = 2 since we have a nominal state
   this->params_.dynamics_rollout_dim_.z = max(2, this->params_.dynamics_rollout_dim_.z);
   this->params_.cost_rollout_dim_.z = max(2, this->params_.cost_rollout_dim_.z);
   this->sampler_->setNumDistributions(2);
 
   // Zero the nominal trajectories
-  setNumTimesteps(this->getNumTimesteps()); // Sets nominal trajectores to proper size
+  setNumTimesteps(this->getNumTimesteps());  // Sets nominal trajectores to proper size
   nominal_state_trajectory_.setZero();
   nominal_state_trajectory_.setZero();
   nominal_control_trajectory_ = this->params_.init_control_traj_;
@@ -41,14 +39,13 @@ TubeMPPI::TubeMPPIController(DYN_T* model, COST_T* cost, FB_T* fb_controller, SA
                              cudaStream_t stream)
   : PARENT_CLASS(model, cost, fb_controller, sampler, params, stream)
 {
-
   // call rollout kernel with z = 2 since we have a nominal state
   this->params_.dynamics_rollout_dim_.z = max(2, this->params_.dynamics_rollout_dim_.z);
   this->params_.cost_rollout_dim_.z = max(2, this->params_.cost_rollout_dim_.z);
   this->sampler_->setNumDistributions(2);
 
   // Zero the nominal trajectories
-  setNumTimesteps(this->getNumTimesteps()); // Sets nominal trajectores to proper size
+  setNumTimesteps(this->getNumTimesteps());  // Sets nominal trajectores to proper size
   nominal_state_trajectory_.setZero();
   nominal_state_trajectory_.setZero();
   nominal_control_trajectory_ = this->params_.init_control_traj_;
@@ -162,10 +159,9 @@ void TubeMPPI::chooseAppropriateKernel()
     kernel_choice = "single";
   }
   this->logger_->info("Choosing %s kernel based on split taking %f ms and single taking %f ms after %d iterations\n",
-                     kernel_choice.c_str(), split_kernel_time_ms, single_kernel_time_ms,
-                     this->getNumKernelEvaluations());
+                      kernel_choice.c_str(), split_kernel_time_ms, single_kernel_time_ms,
+                      this->getNumKernelEvaluations());
 }
-
 
 TUBE_MPPI_TEMPLATE
 void TubeMPPI::setNumTimesteps(const int num_timesteps)

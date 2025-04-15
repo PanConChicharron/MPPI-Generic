@@ -343,8 +343,8 @@ void runTube(const Eigen::Ref<const Eigen::Matrix<float, Dyn::STATE_DIM, total_t
   auto fb_params = fb_controller.getParams();
   fb_params.Q.diagonal() << 500, 500, 100, 100;
   fb_controller.setParams(fb_params);
-  auto controller = TubeMPPIController<Dyn, SCost, Feedback, 1024, Sampler>(
-      &model, &cost, &fb_controller, &sampler, dt, max_iter, lambda, alpha, num_timesteps);
+  auto controller = TubeMPPIController<Dyn, SCost, Feedback, 1024, Sampler>(&model, &cost, &fb_controller, &sampler, dt,
+                                                                            max_iter, lambda, alpha, num_timesteps);
   auto controller_params = controller.getParams();
   controller_params.dynamics_rollout_dim_ = dim3(64, 1, 1);
   controller_params.cost_rollout_dim_ = dim3(min(64, num_timesteps), 1, 1);
@@ -435,8 +435,8 @@ void runTubeRC(const Eigen::Ref<const Eigen::Matrix<float, Dyn::STATE_DIM, total
   auto fb_params = fb_controller.getParams();
   fb_params.Q.diagonal() << 500, 500, 100, 100;
   fb_controller.setParams(fb_params);
-  auto controller = TubeMPPIController<Dyn, RCost, Feedback, 1024>(
-      &model, &cost, &fb_controller, &sampler, dt, max_iter, lambda, alpha, num_timesteps);
+  auto controller = TubeMPPIController<Dyn, RCost, Feedback, 1024>(&model, &cost, &fb_controller, &sampler, dt,
+                                                                   max_iter, lambda, alpha, num_timesteps);
   auto controller_params = controller.getParams();
   controller_params.dynamics_rollout_dim_ = dim3(64, 1, 1);
   controller_params.cost_rollout_dim_ = dim3(min(64, num_timesteps), 1, 1);

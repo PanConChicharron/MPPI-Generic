@@ -3,8 +3,7 @@
 #include <exception>
 
 #define ROBUST_MPPI_TEMPLATE                                                                                           \
-  template <class DYN_T, class COST_T, class FB_T, int NUM_ROLLOUTS, class SAMPLING_T,              \
-            class PARAMS_T>
+  template <class DYN_T, class COST_T, class FB_T, int NUM_ROLLOUTS, class SAMPLING_T, class PARAMS_T>
 
 #define RobustMPPI RobustMPPIController<DYN_T, COST_T, FB_T, NUM_ROLLOUTS, SAMPLING_T, PARAMS_T>
 
@@ -24,7 +23,7 @@ RobustMPPI::RobustMPPIController(DYN_T* model, COST_T* cost, FB_T* fb_controller
   this->sampler_->setNumDistributions(2);
 
   // Zero the nominal trajectories
-  setNumTimesteps(this->getNumTimesteps()); // Sets nominal trajectores to proper size
+  setNumTimesteps(this->getNumTimesteps());  // Sets nominal trajectores to proper size
   nominal_state_trajectory_.setZero();
   trajectory_costs_nominal_.setZero();
 
@@ -58,7 +57,7 @@ RobustMPPI::RobustMPPIController(DYN_T* model, COST_T* cost, FB_T* fb_controller
   this->sampler_->setNumDistributions(2);
 
   // Zero the nominal trajectories
-  setNumTimesteps(this->getNumTimesteps()); // Sets nominal trajectores to proper size
+  setNumTimesteps(this->getNumTimesteps());  // Sets nominal trajectores to proper size
   nominal_state_trajectory_.setZero();
   trajectory_costs_nominal_.setZero();
 

@@ -5,8 +5,7 @@
 #include <mppi/sampling_distributions/colored_noise/colored_noise.cuh>
 
 #define ColoredMPPI_TEMPLATE                                                                                           \
-  template <class DYN_T, class COST_T, class FB_T, int NUM_ROLLOUTS, class SAMPLING_T,              \
-            class PARAMS_T>
+  template <class DYN_T, class COST_T, class FB_T, int NUM_ROLLOUTS, class SAMPLING_T, class PARAMS_T>
 #define ColoredMPPI ColoredMPPIController<DYN_T, COST_T, FB_T, NUM_ROLLOUTS, SAMPLING_T, PARAMS_T>
 
 ColoredMPPI_TEMPLATE ColoredMPPI::ColoredMPPIController(DYN_T* model, COST_T* cost, FB_T* fb_controller,
@@ -133,8 +132,8 @@ ColoredMPPI_TEMPLATE void ColoredMPPI::chooseAppropriateKernel()
     kernel_choice = "single";
   }
   this->logger_->info("Choosing %s kernel based on split taking %f ms and single taking %f ms after %d iterations\n",
-                     kernel_choice.c_str(), split_kernel_time_ms, single_kernel_time_ms,
-                     this->getNumKernelEvaluations());
+                      kernel_choice.c_str(), split_kernel_time_ms, single_kernel_time_ms,
+                      this->getNumKernelEvaluations());
 }
 
 ColoredMPPI_TEMPLATE ColoredMPPI::~ColoredMPPIController()

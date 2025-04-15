@@ -101,11 +101,11 @@ public:
    * @param num_timesteps The number of timesteps to look ahead for.
    * TODO Finish this description
    */
-  RobustMPPIController(DYN_T* model, COST_T* cost, FB_T* fb_controller, SAMPLING_T* sampler, float dt, int max_iter,
-                       float lambda, float alpha, float value_function_threshold, int num_timesteps,
-                       const Eigen::Ref<const control_trajectory>& init_control_traj = control_trajectory::Zero(DYN_T::CONTROL_DIM, 1),
-                       int num_candidate_nominal_states = 9, int optimization_stride = 1,
-                       cudaStream_t stream = nullptr);
+  RobustMPPIController(
+      DYN_T* model, COST_T* cost, FB_T* fb_controller, SAMPLING_T* sampler, float dt, int max_iter, float lambda,
+      float alpha, float value_function_threshold, int num_timesteps,
+      const Eigen::Ref<const control_trajectory>& init_control_traj = control_trajectory::Zero(DYN_T::CONTROL_DIM, 1),
+      int num_candidate_nominal_states = 9, int optimization_stride = 1, cudaStream_t stream = nullptr);
 
   RobustMPPIController(DYN_T* model, COST_T* cost, FB_T* fb_controller, SAMPLING_T* sampler, PARAMS_T& params,
                        cudaStream_t stream = nullptr);

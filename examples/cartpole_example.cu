@@ -44,8 +44,8 @@ int main(int argc, char** argv)
   auto fb_controller = new DDPFeedback<CartpoleDynamics>(model, dt);
 
   auto CartpoleController =
-      new VanillaMPPIController<CartpoleDynamics, CartpoleQuadraticCost, DDPFeedback<CartpoleDynamics>,
-                                2048>(model, cost, fb_controller, sampler, dt, max_iter, lambda, alpha, num_timesteps);
+      new VanillaMPPIController<CartpoleDynamics, CartpoleQuadraticCost, DDPFeedback<CartpoleDynamics>, 2048>(
+          model, cost, fb_controller, sampler, dt, max_iter, lambda, alpha, num_timesteps);
   auto controller_params = CartpoleController->getParams();
   controller_params.dynamics_rollout_dim_ = dim3(64, 4, 1);
   controller_params.cost_rollout_dim_ = dim3(64, 4, 1);

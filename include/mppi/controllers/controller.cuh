@@ -103,14 +103,15 @@ public:
   typedef Eigen::Matrix<float, DYN_T::OUTPUT_DIM, Eigen::Dynamic> output_trajectory;  // An output trajectory
 
   // Cost typedefs
-  typedef Eigen::Matrix<float, 1,  Eigen::Dynamic> cost_trajectory;  // +1 for terminal cost
+  typedef Eigen::Matrix<float, 1, Eigen::Dynamic> cost_trajectory;  // +1 for terminal cost
   typedef Eigen::Matrix<float, NUM_ROLLOUTS, 1> sampled_cost_traj;
   typedef Eigen::Matrix<int, 1, Eigen::Dynamic> crash_status_trajectory;
 
-  Controller(DYN_T* model, COST_T* cost, FB_T* fb_controller, SAMPLING_T* sampler, float dt, int max_iter, float lambda,
-             float alpha, int num_timesteps,
-             const Eigen::Ref<const control_trajectory>& init_control_traj = control_trajectory::Zero(DYN_T::CONTROL_DIM, 1),
-             cudaStream_t stream = nullptr)
+  Controller(
+      DYN_T* model, COST_T* cost, FB_T* fb_controller, SAMPLING_T* sampler, float dt, int max_iter, float lambda,
+      float alpha, int num_timesteps,
+      const Eigen::Ref<const control_trajectory>& init_control_traj = control_trajectory::Zero(DYN_T::CONTROL_DIM, 1),
+      cudaStream_t stream = nullptr)
   {
     // Create the random number generator
     createAndSeedCUDARandomNumberGen();
@@ -135,7 +136,7 @@ public:
     resizeTimeTrajectory<DYN_T::CONTROL_DIM>(params.init_control_traj_, num_timesteps);
     params.init_control_traj_.block(0, 0, DYN_T::CONTROL_DIM, init_control_traj.cols()) = init_control_traj;
     if (init_control_traj.cols() < getNumTimesteps())
-    { // Copy last control value to fill time horizon
+    {  // Copy last control value to fill time horizon
       for (int i = init_control_traj.cols(); i < getNumTimesteps(); i++)
       {
         params.init_control_traj_.col(i) = init_control_traj.col(init_control_traj.cols() - 1);
@@ -359,7 +360,8 @@ public:
    * @param steps - number of dt's to slide control sequence forward
    * Slide the control sequence forwards by 'steps'
    */
-  virtual void slideControlSequence(int steps) {
+  virtual void slideControlSequence(int steps)
+  {
     // Save the control history
     this->saveControlHistoryHelper(steps, this->control_, this->control_history_);
 
@@ -677,7 +679,8 @@ public:
   {
     if (num_timesteps <= 0)
     {
-      this->logger_->error("You must give a number of timesteps greater than 0. Attempted timestep change: %d\n", num_timesteps);
+      this->logger_->error("You must give a number of timesteps greater than 0. Attempted timestep change: %d\n",
+                           num_timesteps);
       return;
     }
     bool larger_array_needed = num_timesteps > params_.num_timesteps_;
