@@ -38,7 +38,13 @@ struct DDPFeedbackState : GPUState
   cudaStream_t stream_ = 0;
   DDPFeedbackState(int num_timesteps = 1, cudaStream_t stream = 0);
 
+  DDPFeedbackState(const DDPFeedbackState<DYN_T>& other); // deep copy constructor
+
   ~DDPFeedbackState();
+
+  DDPFeedbackState<DYN_T>& operator=(DDPFeedbackState<DYN_T> other);
+
+  friend void swap(DDPFeedbackState<DYN_T>& first, DDPFeedbackState<DYN_T>& second);
 
 
   /**

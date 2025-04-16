@@ -13,25 +13,26 @@
 
 static const int number_rollouts = 1200;
 static const int NUM_TIMESTEPS = 100;
-using FEEDBACK_T = DDPFeedback<MockDynamics, NUM_TIMESTEPS>;
+using FEEDBACK_T = DDPFeedback<MockDynamics>;
 const dim3 rolloutDim(1, 2, 1);
 using SAMPLER_T = mppi::sampling_distributions::GaussianDistribution<MockDynamics::DYN_PARAMS_T>;
 
-class TestController : public Controller<MockDynamics, MockCost, FEEDBACK_T, SAMPLER_T, NUM_TIMESTEPS, number_rollouts>
+class TestController : public Controller<MockDynamics, MockCost, FEEDBACK_T, SAMPLER_T, number_rollouts>
 {
 public:
-  typedef Controller<MockDynamics, MockCost, FEEDBACK_T, SAMPLER_T, NUM_TIMESTEPS, number_rollouts> PARENT_CLASS;
+  typedef Controller<MockDynamics, MockCost, FEEDBACK_T, SAMPLER_T, number_rollouts> PARENT_CLASS;
   using PARAMS_T = PARENT_CLASS::TEMPLATED_PARAMS;
 
   TestController(MockDynamics* model, MockCost* cost, FEEDBACK_T* fb_controller, SAMPLER_T* sampler, float dt,
-                 int max_iter, float lambda, float alpha, int num_timesteps = 100,
-                 const Eigen::Ref<const control_trajectory>& init_control_traj = control_trajectory::Zero(),
+                 int max_iter, float lambda, float alpha, int num_timesteps,
+                 const Eigen::Ref<const control_trajectory>& init_control_traj =
+                     control_trajectory::Zero(MockDynamics::CONTROL_DIM, 1),
                  cudaStream_t stream = nullptr)
     : PARENT_CLASS(model, cost, fb_controller, sampler, dt, max_iter, lambda, alpha, num_timesteps, init_control_traj,
                    stream)
   {
     // Allocate CUDA memory for the controller
-    allocateCUDAMemoryHelper(0);
+    allocateCUDAMemoryHelper(1);
   }
 
   TestController(MockDynamics* model, MockCost* cost, FEEDBACK_T* fb_controller, SAMPLER_T* sampler, PARAMS_T& params,
@@ -39,7 +40,7 @@ public:
     : PARENT_CLASS(model, cost, fb_controller, sampler, params, stream)
   {
     // Allocate CUDA memory for the controller
-    allocateCUDAMemoryHelper(0);
+    allocateCUDAMemoryHelper(1);
   }
 
   virtual void computeControl(const Eigen::Ref<const state_array>& state, int optimization_stride) override
@@ -97,7 +98,8 @@ protected:
     EXPECT_CALL(*mockDynamics, GPUSetup()).Times(1);
     // EXPECT_CALL(mockFeedback, GPUSetup()).Times(1);
 
-    controller = new TestController(mockDynamics, mockCost, mockFeedback, sampler, dt, max_iter, lambda, alpha);
+    controller =
+        new TestController(mockDynamics, mockCost, mockFeedback, sampler, dt, max_iter, lambda, alpha, NUM_TIMESTEPS);
     auto controller_params = controller->getParams();
     controller_params.dynamics_rollout_dim_ = rolloutDim;
     controller_params.cost_rollout_dim_ = rolloutDim;
@@ -105,6 +107,8 @@ protected:
   }
   void TearDown() override
   {
+    EXPECT_CALL(*mockDynamics, freeCudaMem()).Times(1);
+    EXPECT_CALL(*mockCost, freeCudaMem()).Times(1);
     delete controller;
     delete mockDynamics;
     delete mockCost;
@@ -129,7 +133,8 @@ TEST_F(ControllerTests, ConstructorDestructor)
 {
   int num_timesteps = 10;
 
-  TestController::control_trajectory init_control_trajectory = TestController::control_trajectory::Ones();
+  TestController::control_trajectory init_control_trajectory =
+      TestController::control_trajectory::Ones(MockDynamics::CONTROL_DIM, num_timesteps);
 
   // expect double check rebind
   EXPECT_CALL(*mockCost, bindToStream(stream)).Times(1);
@@ -158,6 +163,8 @@ TEST_F(ControllerTests, ConstructorDestructor)
   // EXPECT_NE(controller_test->getRandomSeed(), 0);
 
   // TODO check for correct defaults
+  EXPECT_CALL(*mockDynamics, freeCudaMem()).Times(1);
+  EXPECT_CALL(*mockCost, freeCudaMem()).Times(1);
   delete controller_test;
 }
 
@@ -170,7 +177,8 @@ TEST_F(ControllerTests, ParamBasedConstructor)
   controller_params.num_iters_ = max_iter;
   controller_params.lambda_ = lambda;
   controller_params.alpha_ = alpha;
-  controller_params.init_control_traj_ = TestController::control_trajectory::Ones();
+  controller_params.init_control_traj_ =
+      TestController::control_trajectory::Ones(MockDynamics::CONTROL_DIM, num_timesteps);
 
   // expect double check rebind
   EXPECT_CALL(*mockCost, bindToStream(stream)).Times(1);
@@ -199,21 +207,58 @@ TEST_F(ControllerTests, ParamBasedConstructor)
   // EXPECT_NE(controller_test->getRandomSeed(), 0);
 
   // TODO check for correct defaults
+  EXPECT_CALL(*mockDynamics, freeCudaMem()).Times(1);
+  EXPECT_CALL(*mockCost, freeCudaMem()).Times(1);
   delete controller_test;
 }
 
 TEST_F(ControllerTests, setNumTimesteps)
 {
   controller->setNumTimesteps(10);
+  auto control_traj = controller->getControlSeq();
+  auto target_state_traj = controller->getTargetStateSeq();
+  auto actual_state_traj = controller->getActualStateSeq();
+  auto feedback_state_traj = controller->getFeedbackPropagatedStateSeq();
+  auto target_output_traj = controller->getTargetOutputSeq();
+  auto actual_output_traj = controller->getActualOutputSeq();
+  auto controller_params = controller->getParams();
+  auto sampler_params = controller->getSamplingParams();
+
   EXPECT_EQ(controller->getNumTimesteps(), 10);
+  EXPECT_EQ(control_traj.cols(), 10);
+  EXPECT_EQ(target_state_traj.cols(), 10);
+  EXPECT_EQ(actual_state_traj.cols(), 10);
+  EXPECT_EQ(feedback_state_traj.cols(), 10);
+  EXPECT_EQ(target_output_traj.cols(), 10);
+  EXPECT_EQ(actual_output_traj.cols(), 10);
+  EXPECT_EQ(controller_params.init_control_traj_.cols(), 10);
+  EXPECT_EQ(sampler_params.num_timesteps, 10);
 
   controller->setNumTimesteps(1000);
-  EXPECT_EQ(controller->getNumTimesteps(), 100);
+  control_traj = controller->getControlSeq();
+  target_state_traj = controller->getTargetStateSeq();
+  actual_state_traj = controller->getActualStateSeq();
+  feedback_state_traj = controller->getFeedbackPropagatedStateSeq();
+  target_output_traj = controller->getTargetOutputSeq();
+  actual_output_traj = controller->getActualOutputSeq();
+  controller_params = controller->getParams();
+  sampler_params = controller->getSamplingParams();
+
+  EXPECT_EQ(controller->getNumTimesteps(), 1000);
+  EXPECT_EQ(control_traj.cols(), 1000);
+  EXPECT_EQ(target_state_traj.cols(), 1000);
+  EXPECT_EQ(actual_state_traj.cols(), 1000);
+  EXPECT_EQ(feedback_state_traj.cols(), 1000);
+  EXPECT_EQ(target_output_traj.cols(), 1000);
+  EXPECT_EQ(actual_output_traj.cols(), 1000);
+  EXPECT_EQ(controller_params.init_control_traj_.cols(), 1000);
+  EXPECT_EQ(sampler_params.num_timesteps, 1000);
 }
 
 TEST_F(ControllerTests, smoothControlTrajectory)
 {
-  TestController::control_trajectory u;
+  TestController::control_trajectory u =
+      TestController::control_trajectory::Zero(MockDynamics::CONTROL_DIM, NUM_TIMESTEPS);
   u.col(0) = TestController::control_array::Ones();
   u.col(1) = 2.0 * TestController::control_array::Ones();
   Eigen::Matrix<float, MockDynamics::CONTROL_DIM, 2> control_history =
@@ -239,7 +284,8 @@ TEST_F(ControllerTests, smoothControlTrajectory)
 
 TEST_F(ControllerTests, slideControlSequenceHelper)
 {
-  TestController::control_trajectory u;
+  TestController::control_trajectory u =
+      TestController::control_trajectory::Zero(MockDynamics::CONTROL_DIM, NUM_TIMESTEPS);
   for (int i = 0; i < controller->getNumTimesteps(); i++)
   {
     TestController::control_array control = TestController::control_array::Ones();
@@ -289,8 +335,11 @@ TEST_F(ControllerTests, computeStateTrajectoryHelper)
   EXPECT_CALL(*mockDynamics, step(testing::_, testing::_, testing::_, testing::_, testing::_, testing::_, dt))
       .Times(controller->getNumTimesteps() - 1);
 
-  TestController::state_trajectory result = TestController::state_trajectory::Ones();
-  TestController::control_trajectory u = TestController::control_trajectory::Zero();
+  TestController::state_trajectory result =
+      TestController::state_trajectory::Ones(MockDynamics::STATE_DIM, controller->getNumTimesteps());
+  TestController::control_trajectory u =
+      TestController::control_trajectory::Zero(MockDynamics::CONTROL_DIM, controller->getNumTimesteps());
+  EXPECT_CALL(*mockDynamics, enforceConstraints(testing::_, testing::_)).Times(controller->getNumTimesteps() - 1);
   controller->computeStateTrajectoryHelper(result, x, u);
 
   // TODO: Figure out if we can actually check output if output is not part of input
@@ -305,7 +354,8 @@ TEST_F(ControllerTests, computeStateTrajectoryHelper)
 
 TEST_F(ControllerTests, interpolateControl)
 {
-  TestController::control_trajectory traj;
+  TestController::control_trajectory traj =
+      TestController::control_trajectory::Zero(MockDynamics::CONTROL_DIM, NUM_TIMESTEPS);
   for (int i = 0; i < controller->getNumTimesteps(); i++)
   {
     traj.col(i) = TestController::control_array::Ones() * i;
@@ -322,12 +372,13 @@ TEST_F(ControllerTests, interpolateFeedback)
 {
   controller->initFeedback();
   auto fb_state = controller->getFeedbackState();
-  for (int i = 0; i < fb_state.FEEDBACK_SIZE; i++)
+  for (int i = 0; i < fb_state.size(); i++)
   {
-    fb_state.fb_gain_traj_[i] = i;
+    fb_state.getFeedbackGainPtr()[i] = i;
   }
 
-  TestController::state_trajectory s_traj = TestController::state_trajectory::Zero();
+  TestController::state_trajectory s_traj =
+      TestController::state_trajectory::Zero(MockDynamics::STATE_DIM, controller->getNumTimesteps());
 
   TestController::state_array state = TestController::state_array::Ones();
   for (double i = 0; i < controller->getNumTimesteps() - 1; i += 0.25)
@@ -343,7 +394,7 @@ TEST_F(ControllerTests, getCurrentControlTest)
 {
   EXPECT_CALL(*mockDynamics, enforceConstraints(testing::_, testing::_)).Times(4 * (controller->getNumTimesteps() - 1));
 
-  TestController::control_trajectory traj;
+  TestController::control_trajectory traj = controller->getControlSeq();
   controller->initFeedback();
   auto fb_state = controller->getFeedbackState();
   for (int i = 0; i < controller->getNumTimesteps(); i++)
@@ -351,12 +402,13 @@ TEST_F(ControllerTests, getCurrentControlTest)
     for (int j = 0; j < MockDynamics::STATE_DIM * MockDynamics::CONTROL_DIM; j++)
     {
       int i_index = i * MockDynamics::STATE_DIM * MockDynamics::CONTROL_DIM;
-      fb_state.fb_gain_traj_[i_index + j] = i_index + j;
+      fb_state.getFeedbackGainPtr()[i_index + j] = i_index + j;
     }
     traj.col(i) = TestController::control_array::Ones() * i;
   }
 
-  TestController::state_trajectory s_traj = TestController::state_trajectory::Zero();
+  TestController::state_trajectory s_traj =
+      TestController::state_trajectory::Zero(MockDynamics::STATE_DIM, controller->getNumTimesteps());
 
   TestController::state_array state = TestController::state_array::Ones();
   for (double i = 0; i < controller->getNumTimesteps() - 1; i += 0.25)
@@ -371,7 +423,8 @@ TEST_F(ControllerTests, getCurrentControlTest)
 TEST_F(ControllerTests, saveControlHistoryHelper_1)
 {
   int steps = 1;
-  TestController::control_trajectory u = TestController::control_trajectory::Random();
+  TestController::control_trajectory u =
+      TestController::control_trajectory::Random(MockDynamics::CONTROL_DIM, NUM_TIMESTEPS);
   Eigen::Matrix<float, MockDynamics::CONTROL_DIM, 2> u_history;
   u_history.setOnes();
 
@@ -387,7 +440,8 @@ TEST_F(ControllerTests, saveControlHistoryHelper_1)
 TEST_F(ControllerTests, saveControlHistoryHelper_2)
 {
   int steps = 4;
-  TestController::control_trajectory u = TestController::control_trajectory::Random();
+  TestController::control_trajectory u =
+      TestController::control_trajectory::Random(MockDynamics::CONTROL_DIM, NUM_TIMESTEPS);
   Eigen::Matrix<float, MockDynamics::CONTROL_DIM, 2> u_history;
   u_history.setOnes();
 

@@ -13,10 +13,49 @@ DDPFeedbackState<DYN_T>::DDPFeedbackState(int num_timesteps, cudaStream_t stream
 }
 
 template <class DYN_T>
+DDPFeedbackState<DYN_T>::DDPFeedbackState(const DDPFeedbackState<DYN_T>& other)
+{
+  setCUDAStream(other.stream_);
+  setNumTimesteps(other.getNumTimesteps()); // this creates the CPU memory fb_gain_traj_
+  if (other.fb_gain_traj_d_)
+  {
+    allocateCUDAMemory();
+    HANDLE_ERROR(cudaMemcpyAsync(fb_gain_traj_d_, other.fb_gain_traj_d_, sizeof(float) * size(), cudaMemcpyDeviceToDevice, stream_));
+    HANDLE_ERROR(cudaStreamSynchronize(stream_));
+  }
+  for (int i = 0; i < size(); i++)
+  {
+    fb_gain_traj_[i] = other.fb_gain_traj_[i];
+  }
+}
+
+// This method is not a member method but it can access member variables as it is friended
+template <class DYN_T>
+void swap(DDPFeedbackState<DYN_T>& first, DDPFeedbackState<DYN_T>& second)
+{
+  using std::swap; // Declare like this for ADL purposes
+  swap(first.num_timesteps_, second.num_timesteps_);
+  swap(first.stream_, second.stream_);
+  swap(first.fb_gain_traj_, second.fb_gain_traj_);
+  swap(first.fb_gain_traj_d_, second.fb_gain_traj_d_);
+}
+
+// Let the compiler create a new DDPFeedbackState by explicitly using pass by value
+template <class DYN_T>
+DDPFeedbackState<DYN_T>& DDPFeedbackState<DYN_T>::operator=(DDPFeedbackState<DYN_T> other)
+{
+  swap(*this, other);
+  return *this;
+}
+
+template <class DYN_T>
 DDPFeedbackState<DYN_T>::~DDPFeedbackState()
 {
-  delete[] fb_gain_traj_;
-  fb_gain_traj_ = nullptr;
+  if (fb_gain_traj_ != nullptr)
+  {
+    delete[] fb_gain_traj_;
+    fb_gain_traj_ = nullptr;
+  }
 }
 
 template <class DYN_T>
@@ -94,8 +133,11 @@ __host__ void DDPFeedbackState<DYN_T>::allocateCUDAMemory()
 template <class DYN_T>
 __host__ void DDPFeedbackState<DYN_T>::deallocateCUDAMemory()
 {
-  HANDLE_ERROR(cudaFree(fb_gain_traj_d_));
-  fb_gain_traj_d_ = nullptr;
+  if (fb_gain_traj_d_)
+  {
+    HANDLE_ERROR(cudaFree(fb_gain_traj_d_));
+    fb_gain_traj_d_ = nullptr;
+  }
 }
 
 template <class DYN_T>
