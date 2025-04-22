@@ -91,7 +91,8 @@ public:
   /**
    * ==================== NECESSARY METHODS TO OVERWRITE =====================
    */
-  __device__ void k(const float* __restrict__ x_act, const float* __restrict__  x_goal, const int t, float* __restrict__  theta, float* __restrict__  control_output)
+  __device__ void k(const float* __restrict__ x_act, const float* __restrict__ x_goal, const int t,
+                    float* __restrict__ theta, float* __restrict__ control_output)
   {
   }
   /**
@@ -108,8 +109,10 @@ public:
   {
   }
 
-  __device__ void initializeFeedback(const float* __restrict__ x, const float* __restrict__ u, float* __restrict__ theta, const float t, const float dt)
-  {}
+  __device__ void initializeFeedback(const float* __restrict__ x, const float* __restrict__ u,
+                                     float* __restrict__ theta, const float t, const float dt)
+  {
+  }
 
   // Abstract method to copy information to GPU
   // void copyToDevice() {}
@@ -196,8 +199,8 @@ public:
    *  - x_goal: the state we want to be at
    *  - index: the number of timesteps from the initial time we are
    */
-  virtual __host__ control_array k(const Eigen::Ref<const state_array>& x_act, const Eigen::Ref<const state_array>& x_goal,
-                          int t)
+  virtual __host__ control_array k(const Eigen::Ref<const state_array>& x_act,
+                                   const Eigen::Ref<const state_array>& x_goal, int t)
   {
     TEMPLATED_FEEDBACK_STATE* gpu_feedback_state = getFeedbackStatePointer();
     return k_(x_act, x_goal, t, *gpu_feedback_state);
@@ -205,18 +208,19 @@ public:
   /**
    * Feeback Control Method to overwrite.
    */
-  virtual __host__ control_array k_(const Eigen::Ref<const state_array>& x_act, const Eigen::Ref<const state_array>& x_goal,
-                           int t, TEMPLATED_FEEDBACK_STATE& fb_state) = 0;
+  virtual __host__ control_array k_(const Eigen::Ref<const state_array>& x_act,
+                                    const Eigen::Ref<const state_array>& x_goal, int t,
+                                    TEMPLATED_FEEDBACK_STATE& fb_state) = 0;
 
   // might not be a needed method
   virtual __host__ void computeFeedback(const Eigen::Ref<const state_array>& init_state,
-                               const Eigen::Ref<const state_trajectory>& goal_traj,
-                               const Eigen::Ref<const control_trajectory>& control_traj) = 0;
+                                        const Eigen::Ref<const state_trajectory>& goal_traj,
+                                        const Eigen::Ref<const control_trajectory>& control_traj) = 0;
 
   // TODO Construct a default version of this method that uses the state_ variable automatically
   virtual __host__ control_array interpolateFeedback_(const Eigen::Ref<const state_array>& state,
-                                             const Eigen::Ref<const state_array>& goal_state, double rel_time,
-                                             TEMPLATED_FEEDBACK_STATE& fb_state)
+                                                      const Eigen::Ref<const state_array>& goal_state, double rel_time,
+                                                      TEMPLATED_FEEDBACK_STATE& fb_state)
   {
     int lower_idx = (int)(rel_time / dt_);
     int upper_idx = lower_idx + 1;
@@ -229,7 +233,7 @@ public:
   }
 
   virtual __host__ control_array interpolateFeedback(const Eigen::Ref<const state_array>& state,
-                                            const Eigen::Ref<const state_array>& goal_state, double rel_time)
+                                                     const Eigen::Ref<const state_array>& goal_state, double rel_time)
   {
     TEMPLATED_FEEDBACK_STATE* fb_state = getFeedbackStatePointer();
     return interpolateFeedback_(state, goal_state, rel_time, *fb_state);

@@ -1,6 +1,5 @@
 #include <mppi/feedback_controllers/DDP/ddp.cuh>
 
-
 /**
  * Methods for DDPFeedbackState
  */
@@ -16,11 +15,12 @@ template <class DYN_T>
 DDPFeedbackState<DYN_T>::DDPFeedbackState(const DDPFeedbackState<DYN_T>& other)
 {
   setCUDAStream(other.stream_);
-  setNumTimesteps(other.getNumTimesteps()); // this creates the CPU memory fb_gain_traj_
+  setNumTimesteps(other.getNumTimesteps());  // this creates the CPU memory fb_gain_traj_
   if (other.fb_gain_traj_d_)
   {
     allocateCUDAMemory();
-    HANDLE_ERROR(cudaMemcpyAsync(fb_gain_traj_d_, other.fb_gain_traj_d_, sizeof(float) * size(), cudaMemcpyDeviceToDevice, stream_));
+    HANDLE_ERROR(cudaMemcpyAsync(fb_gain_traj_d_, other.fb_gain_traj_d_, sizeof(float) * size(),
+                                 cudaMemcpyDeviceToDevice, stream_));
     HANDLE_ERROR(cudaStreamSynchronize(stream_));
   }
   for (int i = 0; i < size(); i++)
@@ -33,7 +33,7 @@ DDPFeedbackState<DYN_T>::DDPFeedbackState(const DDPFeedbackState<DYN_T>& other)
 template <class DYN_T>
 void swap(DDPFeedbackState<DYN_T>& first, DDPFeedbackState<DYN_T>& second)
 {
-  using std::swap; // Declare like this for ADL purposes
+  using std::swap;  // Declare like this for ADL purposes
   swap(first.num_timesteps_, second.num_timesteps_);
   swap(first.stream_, second.stream_);
   swap(first.fb_gain_traj_, second.fb_gain_traj_);
@@ -77,10 +77,10 @@ void DDPFeedbackState<DYN_T>::setNumTimesteps(const int num_timesteps)
       // }
       delete[] fb_gain_traj_;
     }
-    fb_gain_traj_ = new float[size()](); // Initialize to zero
+    fb_gain_traj_ = new float[size()]();  // Initialize to zero
     // fb_gain_traj_ = fb_gain_traj_new;
   }
- }
+}
 
 template <class DYN_T>
 void DDPFeedbackState<DYN_T>::setCUDAStream(const cudaStream_t stream)
@@ -143,7 +143,8 @@ __host__ void DDPFeedbackState<DYN_T>::deallocateCUDAMemory()
 template <class DYN_T>
 __host__ void DDPFeedbackState<DYN_T>::copyToDevice(bool synchronize)
 {
-  HANDLE_ERROR(cudaMemcpyAsync(fb_gain_traj_d_, fb_gain_traj_, sizeof(float) * size(), cudaMemcpyHostToDevice, stream_));
+  HANDLE_ERROR(
+      cudaMemcpyAsync(fb_gain_traj_d_, fb_gain_traj_, sizeof(float) * size(), cudaMemcpyHostToDevice, stream_));
   if (synchronize)
   {
     HANDLE_ERROR(cudaStreamSynchronize(stream_));
@@ -171,8 +172,7 @@ bool DDPFeedbackState<DYN_T>::isEqual(const DDPFeedbackState<DYN_T>& other) cons
  * GPU Class for DDP Methods
  */
 template <class GPU_FB_T, class DYN_T>
-DeviceDDPImpl<GPU_FB_T, DYN_T>::DeviceDDPImpl(int num_timesteps, cudaStream_t stream)
-  : PARENT_CLASS(stream)
+DeviceDDPImpl<GPU_FB_T, DYN_T>::DeviceDDPImpl(int num_timesteps, cudaStream_t stream) : PARENT_CLASS(stream)
 {
   this->setNumTimesteps(num_timesteps);
   this->state_.setCUDAStream(stream);
@@ -187,8 +187,8 @@ void DeviceDDPImpl<GPU_FB_T, DYN_T>::allocateCUDAMemory()
 template <class GPU_FB_T, class DYN_T>
 void DeviceDDPImpl<GPU_FB_T, DYN_T>::copyToDevice(bool synchronize)
 {
-  this->state_.copyToDevice(false); // Copy gains to GPU first
-  PARENT_CLASS::copyToDevice(synchronize); // Copy num_timesteps and fb_gain_ptrs to GPU
+  this->state_.copyToDevice(false);         // Copy gains to GPU first
+  PARENT_CLASS::copyToDevice(synchronize);  // Copy num_timesteps and fb_gain_ptrs to GPU
 }
 
 template <class GPU_FB_T, class DYN_T>
@@ -209,12 +209,10 @@ __host__ __device__ int DeviceDDPImpl<GPU_FB_T, DYN_T>::getNumTimesteps() const
   return this->state_.getNumTimesteps();
 }
 
-
 template <class GPU_FB_T, class DYN_T>
-__device__ void DeviceDDPImpl<GPU_FB_T, DYN_T>::k(const float* __restrict__ x_act,
-                                                                 const float* __restrict__ x_goal, const int t,
-                                                                 float* __restrict__ theta,
-                                                                 float* __restrict__ control_output)
+__device__ void DeviceDDPImpl<GPU_FB_T, DYN_T>::k(const float* __restrict__ x_act, const float* __restrict__ x_goal,
+                                                  const int t, float* __restrict__ theta,
+                                                  float* __restrict__ control_output)
 {
   const float* fb_gain_t = &(this->state_.getConstFeedbackGainPtr()[DYN_T::STATE_DIM * DYN_T::CONTROL_DIM * t]);
   float e = 0;
@@ -299,8 +297,8 @@ void DDPFeedback<DYN_T>::setNumTimesteps(const int num_timesteps)
 
 template <class DYN_T>
 void DDPFeedback<DYN_T>::computeFeedback(const Eigen::Ref<const state_array>& init_state,
-                                                        const Eigen::Ref<const state_trajectory>& goal_traj,
-                                                        const Eigen::Ref<const control_trajectory>& control_traj)
+                                         const Eigen::Ref<const state_trajectory>& goal_traj,
+                                         const Eigen::Ref<const control_trajectory>& control_traj)
 {
   run_cost_->setTargets(goal_traj.data(), control_traj.data(), this->num_timesteps_);
 

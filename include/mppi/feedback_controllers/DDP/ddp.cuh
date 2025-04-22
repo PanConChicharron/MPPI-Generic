@@ -28,7 +28,6 @@ struct DDPParams
 template <class DYN_T>
 struct DDPFeedbackState : GPUState
 {
-
   /**
    * Variables
    **/
@@ -38,14 +37,13 @@ struct DDPFeedbackState : GPUState
   cudaStream_t stream_ = 0;
   DDPFeedbackState(int num_timesteps = 1, cudaStream_t stream = 0);
 
-  DDPFeedbackState(const DDPFeedbackState<DYN_T>& other); // deep copy constructor
+  DDPFeedbackState(const DDPFeedbackState<DYN_T>& other);  // deep copy constructor
 
   ~DDPFeedbackState();
 
   DDPFeedbackState<DYN_T>& operator=(DDPFeedbackState<DYN_T> other);
 
   friend void swap(DDPFeedbackState<DYN_T>& first, DDPFeedbackState<DYN_T>& second);
-
 
   /**
    * Methods
@@ -94,8 +92,10 @@ public:
   using PARENT_CLASS = GPUFeedbackController<GPU_FB_T, DYN_T, DDPFeedbackState<DYN_T>>;
   // static const int SHARED_MEM_REQUEST_BLK_BYTES = DYN_T::CONTROL_DIM * DYN_T::STATE_DIM;
   DeviceDDPImpl(int num_timesteps, cudaStream_t stream = 0);
-  DeviceDDPImpl(cudaStream_t stream = 0)
-    : PARENT_CLASS(stream){this->state_.setNumTimesteps(1);};
+  DeviceDDPImpl(cudaStream_t stream = 0) : PARENT_CLASS(stream)
+  {
+    this->state_.setNumTimesteps(1);
+  };
 
   void allocateCUDAMemory();
   void deallocateCUDAMemory();
@@ -105,7 +105,8 @@ public:
 
   __host__ __device__ int getNumTimesteps() const;
 
-  __device__ void k(const float* __restrict__ x_act, const float* __restrict__  x_goal, const int t, float* __restrict__  theta, float* __restrict__  control_output);
+  __device__ void k(const float* __restrict__ x_act, const float* __restrict__ x_goal, const int t,
+                    float* __restrict__ theta, float* __restrict__ control_output);
 };
 
 /**

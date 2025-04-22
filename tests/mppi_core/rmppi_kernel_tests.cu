@@ -25,8 +25,8 @@ public:
   using COST_T = DoubleIntegratorCircleCost;
   // using COST_T = QuadraticCost<DYN_T>;
   using SAMPLER_T = mppi::sampling_distributions::GaussianDistribution<typename DYN_T::DYN_PARAMS_T>;
-  using FB_T = DDPFeedback<DYN_T, num_timesteps>;
-  using control_trajectory = Eigen::Matrix<float, DYN_T::CONTROL_DIM, num_timesteps>;
+  using FB_T = DDPFeedback<DYN_T>;
+  using control_trajectory = Eigen::Matrix<float, DYN_T::CONTROL_DIM, Eigen::Dynamic>;
   using state_array = DYN_T::state_array;
   using output_array = DYN_T::output_array;
   using control_array = DYN_T::control_array;
@@ -140,7 +140,7 @@ TEST_F(RMPPIKernels, ValidateCombinedInitEvalKernelAgainstCPU)
   Eigen::MatrixXf trajectory_costs_cpu = Eigen::MatrixXf::Zero(num_rollouts, 1);
   Eigen::MatrixXf trajectory_costs_gpu = Eigen::MatrixXf::Zero(num_rollouts, 1);
 
-  control_trajectory nominal_trajectory = control_trajectory::Random();
+  control_trajectory nominal_trajectory = control_trajectory::Random(DYN_T::CONTROL_DIM, num_timesteps);
   sampler->copyImportanceSamplerToDevice(nominal_trajectory.data(), 0, false);
   sampler->generateSamples(1, 0, gen, false);
   HANDLE_ERROR(cudaMemcpyAsync(initial_x_d, candidates.data(), sizeof(float) * DYN_T::STATE_DIM * num_candidates,
@@ -224,7 +224,7 @@ TEST_F(RMPPIKernels, ValidateSplitInitEvalKernelAgainstCPU)
   Eigen::MatrixXf trajectory_costs_cpu = Eigen::MatrixXf::Zero(num_rollouts, 1);
   Eigen::MatrixXf trajectory_costs_gpu = Eigen::MatrixXf::Zero(num_rollouts, 1);
 
-  control_trajectory nominal_trajectory = control_trajectory::Random();
+  control_trajectory nominal_trajectory = control_trajectory::Random(DYN_T::CONTROL_DIM, num_timesteps);
   sampler->copyImportanceSamplerToDevice(nominal_trajectory.data(), 0, false);
   sampler->generateSamples(1, 0, gen, false);
   HANDLE_ERROR(cudaMemcpyAsync(initial_x_d, candidates.data(), sizeof(float) * DYN_T::STATE_DIM * num_candidates,
@@ -330,7 +330,7 @@ TEST_F(RMPPIKernels, ValidateCombinedRMPPIRolloutKernelAgainstCPU)
   state_array initial_real_state = state_array::Random();
   state_array initial_nominal_state = state_array::Random();
 
-  control_trajectory nominal_trajectory = control_trajectory::Random();
+  control_trajectory nominal_trajectory = control_trajectory::Random(DYN_T::CONTROL_DIM, num_timesteps);
   sampler->copyImportanceSamplerToDevice(nominal_trajectory.data(), nominal_idx, false);
   sampler->copyImportanceSamplerToDevice(nominal_trajectory.data(), real_idx, false);
   fb_controller->copyToDevice(false);
@@ -405,7 +405,7 @@ TEST_F(RMPPIKernels, ValidateSplitRMPPIRolloutKernelAgainstCPU)
   state_array initial_real_state = state_array::Random();
   state_array initial_nominal_state = state_array::Random();
 
-  control_trajectory nominal_trajectory = control_trajectory::Random();
+  control_trajectory nominal_trajectory = control_trajectory::Random(DYN_T::CONTROL_DIM, num_timesteps);
   sampler->copyImportanceSamplerToDevice(nominal_trajectory.data(), nominal_idx, false);
   sampler->copyImportanceSamplerToDevice(nominal_trajectory.data(), real_idx, false);
   fb_controller->copyToDevice(false);
@@ -521,7 +521,7 @@ TEST_F(RMPPIKernels, ValidateCombinedRMPPIRolloutKernelAgainstMPPIRollout)
 
   state_array initial_real_state = state_array::Random();
 
-  control_trajectory nominal_trajectory = control_trajectory::Random();
+  control_trajectory nominal_trajectory = control_trajectory::Random(DYN_T::CONTROL_DIM, num_timesteps);
   sampler->copyImportanceSamplerToDevice(nominal_trajectory.data(), nominal_idx, false);
   sampler->copyImportanceSamplerToDevice(nominal_trajectory.data(), real_idx, false);
   fb_controller->copyToDevice(false);

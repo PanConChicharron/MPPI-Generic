@@ -356,9 +356,9 @@ TEST_F(BasePlantTest, runControlIterationDebugFalseNoFeedbackTest)
     EXPECT_CALL(*mockController, computeControl(testing::_, testing::_))
         .Times(1)
         .WillRepeatedly(testing::Invoke(wait_function));
-    MockController::control_trajectory control_seq = MockController::control_trajectory::Zero();
+    MockController::control_trajectory control_seq = MockController::control_trajectory::Zero(MockDynamics::CONTROL_DIM, NUM_TIMESTEPS);
     EXPECT_CALL(*mockController, getControlSeq()).Times(1).WillRepeatedly(testing::Return(control_seq));
-    MockController::state_trajectory state_seq = MockController::state_trajectory::Zero();
+    MockController::state_trajectory state_seq = MockController::state_trajectory::Zero(MockDynamics::STATE_DIM, NUM_TIMESTEPS);
     EXPECT_CALL(*mockController, getTargetStateSeq()).Times(1).WillRepeatedly(testing::Return(state_seq));
 
     EXPECT_CALL(*mockController, computeFeedback(testing::_)).Times(0);
@@ -439,9 +439,9 @@ TEST_F(BasePlantTest, runControlIterationDebugFalseFeedbackTest)
     EXPECT_CALL(*mockController, computeControl(testing::_, testing::_))
         .Times(1)
         .WillRepeatedly(testing::Invoke(wait_function));
-    MockController::control_trajectory control_seq = MockController::control_trajectory::Zero();
+    MockController::control_trajectory control_seq = MockController::control_trajectory::Zero(MockDynamics::CONTROL_DIM, NUM_TIMESTEPS);
     EXPECT_CALL(*mockController, getControlSeq()).Times(1).WillRepeatedly(testing::Return(control_seq));
-    MockController::state_trajectory state_seq = MockController::state_trajectory::Zero();
+    MockController::state_trajectory state_seq = MockController::state_trajectory::Zero(MockDynamics::STATE_DIM, NUM_TIMESTEPS);
     EXPECT_CALL(*mockController, getTargetStateSeq()).Times(1).WillRepeatedly(testing::Return(state_seq));
 
     EXPECT_CALL(*mockController, computeFeedback(testing::_)).Times(1).WillRepeatedly(testing::Invoke(wait_function));
@@ -517,9 +517,9 @@ TEST_F(BasePlantTest, runControlIterationDebugFalseFeedbackAvgTest)
     EXPECT_CALL(*mockController, computeControl(testing::_, testing::_))
         .Times(1)
         .WillRepeatedly(testing::Invoke(wait_function));
-    MockController::control_trajectory control_seq = MockController::control_trajectory::Zero();
+    MockController::control_trajectory control_seq = MockController::control_trajectory::Zero(MockDynamics::CONTROL_DIM, NUM_TIMESTEPS);
     EXPECT_CALL(*mockController, getControlSeq()).Times(1).WillRepeatedly(testing::Return(control_seq));
-    MockController::state_trajectory state_seq = MockController::state_trajectory::Zero();
+    MockController::state_trajectory state_seq = MockController::state_trajectory::Zero(MockDynamics::STATE_DIM, NUM_TIMESTEPS);
     EXPECT_CALL(*mockController, getTargetStateSeq()).Times(1).WillRepeatedly(testing::Return(state_seq));
 
     EXPECT_CALL(*mockController, computeFeedback(testing::_)).Times(1).WillRepeatedly(testing::Invoke(wait_function));
@@ -588,9 +588,9 @@ TEST_F(BasePlantTest, runControlLoopRegular)
   EXPECT_CALL(*mockController, computeControl(testing::_, testing::_))
       .Times(iterations / 2)
       .WillRepeatedly(testing::Invoke(wait_function));
-  MockController::control_trajectory control_seq = MockController::control_trajectory::Zero();
+  MockController::control_trajectory control_seq = MockController::control_trajectory::Zero(MockDynamics::CONTROL_DIM, NUM_TIMESTEPS);
   EXPECT_CALL(*mockController, getControlSeq()).Times(iterations / 2).WillRepeatedly(testing::Return(control_seq));
-  MockController::state_trajectory state_seq = MockController::state_trajectory::Zero();
+  MockController::state_trajectory state_seq = MockController::state_trajectory::Zero(MockDynamics::STATE_DIM, NUM_TIMESTEPS);
   EXPECT_CALL(*mockController, getTargetStateSeq()).Times(iterations / 2).WillRepeatedly(testing::Return(state_seq));
   EXPECT_CALL(*mockController, computeFeedback(testing::_))
       .Times(iterations / 2)
@@ -690,9 +690,9 @@ TEST_F(BasePlantTest, runControlLoopSlowed)
   EXPECT_CALL(*mockController, computeControl(testing::_, testing::_))
       .Times(expected_iters)
       .WillRepeatedly(testing::Invoke(wait_function));
-  MockController::control_trajectory control_seq = MockController::control_trajectory::Zero();
+  MockController::control_trajectory control_seq = MockController::control_trajectory::Zero(MockDynamics::CONTROL_DIM, NUM_TIMESTEPS);
   EXPECT_CALL(*mockController, getControlSeq()).Times(expected_iters).WillRepeatedly(testing::Return(control_seq));
-  MockController::state_trajectory state_seq = MockController::state_trajectory::Zero();
+  MockController::state_trajectory state_seq = MockController::state_trajectory::Zero(MockDynamics::STATE_DIM, NUM_TIMESTEPS);
   EXPECT_CALL(*mockController, getTargetStateSeq()).Times(expected_iters).WillRepeatedly(testing::Return(state_seq));
   EXPECT_CALL(*mockController, computeFeedback(testing::_))
       .Times(expected_iters)

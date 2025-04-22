@@ -49,24 +49,23 @@ public:
 
 #include <gtest/gtest.h>
 
-const int MAX_TIMESTEPS = 200;
-using DI_FEEDBACK_T = DDPFeedback<DoubleIntegratorDynamics, MAX_TIMESTEPS>;
+using DI_FEEDBACK_T = DDPFeedback<DoubleIntegratorDynamics>;
 
 template <int NUM_ROLLOUTS>
 using DI_Vanilla = VanillaMPPIController<DoubleIntegratorDynamics, DoubleIntegratorDummyCost, DI_FEEDBACK_T,
-                                         MAX_TIMESTEPS, NUM_ROLLOUTS>;
+                                         NUM_ROLLOUTS>;
 
 template <int NUM_ROLLOUTS>
 using DI_Colored = ColoredMPPIController<DoubleIntegratorDynamics, DoubleIntegratorDummyCost, DI_FEEDBACK_T,
-                                         MAX_TIMESTEPS, NUM_ROLLOUTS>;
+                                         NUM_ROLLOUTS>;
 
 template <int NUM_ROLLOUTS>
 using DI_Tube =
-    TubeMPPIController<DoubleIntegratorDynamics, DoubleIntegratorDummyCost, DI_FEEDBACK_T, MAX_TIMESTEPS, NUM_ROLLOUTS>;
+    TubeMPPIController<DoubleIntegratorDynamics, DoubleIntegratorDummyCost, DI_FEEDBACK_T, NUM_ROLLOUTS>;
 
 template <int NUM_ROLLOUTS>
 using DI_Robust = RobustMPPIController<DoubleIntegratorDynamics, DoubleIntegratorDummyCost, DI_FEEDBACK_T,
-                                       MAX_TIMESTEPS, NUM_ROLLOUTS>;
+                                       NUM_ROLLOUTS>;
 
 // TODO: Add more dynamics/cost function specializations
 

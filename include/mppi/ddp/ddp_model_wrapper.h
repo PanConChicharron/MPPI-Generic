@@ -46,10 +46,8 @@ struct ModelWrapperDDP : public DDP_structures::Dynamics<float, DYNAMICS_T::STAT
   using State = typename PARENT_CLASS::State;
   using Control = typename PARENT_CLASS::Control;
   using Jacobian = typename PARENT_CLASS::Jacobian;
-  using StateTrajectory =
-      typename PARENT_CLASS::StateTrajectory;
-  using ControlTrajectory =
-      typename PARENT_CLASS::ControlTrajectory;
+  using StateTrajectory = typename PARENT_CLASS::StateTrajectory;
+  using ControlTrajectory = typename PARENT_CLASS::ControlTrajectory;
 
   State state;
   Control control;

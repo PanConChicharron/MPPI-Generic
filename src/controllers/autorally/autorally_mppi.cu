@@ -7,7 +7,7 @@
  */
 
 // Convenience typedef for the MPPI Controller.
-template class VanillaMPPIController<DynamicsModel, CostFunctionClass, FEEDBACK_T, NUM_TIMESTEPS, MPPI_NUM_ROLLOUTS__,
+template class VanillaMPPIController<DynamicsModel, CostFunctionClass, FEEDBACK_T, MPPI_NUM_ROLLOUTS__,
                                      Sampler>;
 
 // template class VanillaMPPIController<CartpoleDynamics, CartpoleQuadraticCost, 100, 150, 64, 8>;
