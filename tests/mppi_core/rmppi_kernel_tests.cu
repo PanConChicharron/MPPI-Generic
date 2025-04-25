@@ -72,6 +72,8 @@ public:
     fb_controller->bindToStream(stream);
     curandSetStream(gen, stream);
 
+    fb_controller->setNumTimesteps(num_timesteps);
+
     model->GPUSetup();
     cost->GPUSetup();
     sampler->GPUSetup();

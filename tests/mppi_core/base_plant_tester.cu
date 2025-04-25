@@ -158,6 +158,7 @@ protected:
     mockController->model_ = &mockDynamics;
     mockController->sampler_ = &mockSampler;
     mockController->fb_controller_ = &mockFeedback;
+    mockController->setNumTimesteps(100);
 
     plant = std::make_shared<MockTestPlant>(mockController);
   }
