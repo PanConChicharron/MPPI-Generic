@@ -720,7 +720,7 @@ public:
     {
       num_timesteps = getNumTimesteps();
     }
-    Eigen::NoChange_t same_row;
+    Eigen::NoChange_t same_row = Eigen::NoChange_t::NoChange;
     trajectory.conservativeResize(same_row, num_timesteps);
   }
 

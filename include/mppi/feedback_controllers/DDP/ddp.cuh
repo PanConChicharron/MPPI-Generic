@@ -43,7 +43,8 @@ struct DDPFeedbackState : GPUState
 
   DDPFeedbackState<DYN_T>& operator=(DDPFeedbackState<DYN_T> other);
 
-  friend void swap(DDPFeedbackState<DYN_T>& first, DDPFeedbackState<DYN_T>& second);
+  template <typename D_T>
+  friend void swap(DDPFeedbackState<D_T>& first, DDPFeedbackState<D_T>& second);
 
   /**
    * Methods

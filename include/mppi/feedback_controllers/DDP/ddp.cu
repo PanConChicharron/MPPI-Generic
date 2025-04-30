@@ -31,7 +31,7 @@ DDPFeedbackState<DYN_T>::DDPFeedbackState(const DDPFeedbackState<DYN_T>& other)
 
 // This method is not a member method but it can access member variables as it is friended
 template <class DYN_T>
-void swap(DDPFeedbackState<DYN_T>& first, DDPFeedbackState<DYN_T>& second)
+inline void swap(DDPFeedbackState<DYN_T>& first, DDPFeedbackState<DYN_T>& second)
 {
   using std::swap;  // Declare like this for ADL purposes
   swap(first.num_timesteps_, second.num_timesteps_);
@@ -62,8 +62,8 @@ DDPFeedbackState<DYN_T>::~DDPFeedbackState()
 template <class DYN_T>
 void DDPFeedbackState<DYN_T>::setNumTimesteps(const int num_timesteps)
 {
-  int prev_timesteps = this->num_timesteps_;
-  bool larger_array_needed = num_timesteps > this->num_timesteps_;
+  const int prev_timesteps = this->num_timesteps_;
+  const bool larger_array_needed = num_timesteps > prev_timesteps;
   this->num_timesteps_ = num_timesteps;
   if (larger_array_needed)
   {
