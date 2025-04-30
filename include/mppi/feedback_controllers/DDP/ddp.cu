@@ -56,6 +56,7 @@ DDPFeedbackState<DYN_T>::~DDPFeedbackState()
     delete[] fb_gain_traj_;
     fb_gain_traj_ = nullptr;
   }
+  deallocateCUDAMemory();
 }
 
 template <class DYN_T>

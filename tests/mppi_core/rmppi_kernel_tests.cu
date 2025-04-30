@@ -86,16 +86,17 @@ public:
     delete cost;
     delete sampler;
     delete fb_controller;
-    if (initial_x_d)
-    {
-      HANDLE_ERROR(cudaFree(initial_x_d));
-      initial_x_d = nullptr;
-    }
-    if (cost_trajectories_d)
-    {
-      HANDLE_ERROR(cudaFree(cost_trajectories_d));
-      cost_trajectories_d = nullptr;
-    }
+    HANDLE_CURAND_ERROR(curandDestroyGenerator(gen));
+    // if (initial_x_d)
+    // {
+    //   HANDLE_ERROR(cudaFree(initial_x_d));
+    //   initial_x_d = nullptr;
+    // }
+    // if (cost_trajectories_d)
+    // {
+    //   HANDLE_ERROR(cudaFree(cost_trajectories_d));
+    //   cost_trajectories_d = nullptr;
+    // }
   }
 
   DYN_T* model;
@@ -192,6 +193,8 @@ TEST_F(RMPPIKernels, ValidateCombinedInitEvalKernelAgainstCPU)
     }
   }
   HANDLE_ERROR(cudaFree(strides_d));
+  HANDLE_ERROR(cudaFree(initial_x_d));
+  HANDLE_ERROR(cudaFree(cost_trajectories_d));
 }
 
 TEST_F(RMPPIKernels, ValidateSplitInitEvalKernelAgainstCPU)
@@ -314,6 +317,8 @@ TEST_F(RMPPIKernels, ValidateSplitInitEvalKernelAgainstCPU)
   }
   HANDLE_ERROR(cudaFree(strides_d));
   HANDLE_ERROR(cudaFree(output_d));
+  HANDLE_ERROR(cudaFree(initial_x_d));
+  HANDLE_ERROR(cudaFree(cost_trajectories_d));
 }
 
 TEST_F(RMPPIKernels, ValidateCombinedRMPPIRolloutKernelAgainstCPU)
@@ -387,6 +392,8 @@ TEST_F(RMPPIKernels, ValidateCombinedRMPPIRolloutKernelAgainstCPU)
       }
     }
   }
+  HANDLE_ERROR(cudaFree(initial_x_d));
+  HANDLE_ERROR(cudaFree(cost_trajectories_d));
 }
 
 TEST_F(RMPPIKernels, ValidateSplitRMPPIRolloutKernelAgainstCPU)
@@ -503,6 +510,8 @@ TEST_F(RMPPIKernels, ValidateSplitRMPPIRolloutKernelAgainstCPU)
     }
   }
   HANDLE_ERROR(cudaFree(output_d));
+  HANDLE_ERROR(cudaFree(initial_x_d));
+  HANDLE_ERROR(cudaFree(cost_trajectories_d));
 }
 
 TEST_F(RMPPIKernels, ValidateCombinedRMPPIRolloutKernelAgainstMPPIRollout)
@@ -590,4 +599,6 @@ TEST_F(RMPPIKernels, ValidateCombinedRMPPIRolloutKernelAgainstMPPIRollout)
       }
     }
   }
+  HANDLE_ERROR(cudaFree(initial_x_d));
+  HANDLE_ERROR(cudaFree(cost_trajectories_d));
 }

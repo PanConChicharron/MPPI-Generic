@@ -15,12 +15,14 @@ void CONTROLLER::deallocateCUDAMemory()
     HANDLE_ERROR(cudaFree(output_d_));
     HANDLE_ERROR(cudaFree(trajectory_costs_d_));
     HANDLE_ERROR(cudaFree(cost_baseline_and_norm_d_));
+    HANDLE_CURAND_ERROR(curandDestroyGenerator(gen_));
     CUDA_mem_init_ = false;
   }
   if (sampled_states_CUDA_mem_init_)
   {
     HANDLE_ERROR(cudaFree(sampled_outputs_d_));
     HANDLE_ERROR(cudaFree(sampled_costs_d_));
+    HANDLE_ERROR(cudaFree(sampled_crash_status_d_));
     sampled_states_CUDA_mem_init_ = false;
   }
 }
@@ -243,7 +245,6 @@ void CONTROLLER::resizeSampledControlTrajectories(float perc, int multiplier, in
   if (sampled_states_CUDA_mem_init_)
   {
     HANDLE_ERROR(cudaFree(sampled_outputs_d_));
-    // cudaFree(sampled_noise_d_);
     HANDLE_ERROR(cudaFree(sampled_costs_d_));
     HANDLE_ERROR(cudaFree(sampled_crash_status_d_));
     sampled_states_CUDA_mem_init_ = false;
