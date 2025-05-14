@@ -43,7 +43,6 @@ FNNHelper<USE_SHARED>::~FNNHelper()
 template <bool USE_SHARED>
 void FNNHelper<USE_SHARED>::loadParams(const std::string& model_path)
 {
-  int i, j, k;
   std::string bias_name = "";
   std::string weight_name = "";
   if (!fileExists(model_path))
@@ -425,8 +424,6 @@ __device__ float* FNNHelper<USE_SHARED>::forward(float* input, float* theta_s, f
   float* b;
   uint tdy = threadIdx.y;
   uint i, j, k;
-  uint tdx = threadIdx.x;
-  uint tdz = threadIdx.z;
 
   float* theta = theta_;
   int* stride_idcs = stride_idcs_;

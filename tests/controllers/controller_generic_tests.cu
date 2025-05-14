@@ -85,7 +85,6 @@ protected:
     mockFeedback = new FEEDBACK_T(mockDynamics, dt);
     sampler = new SAMPLER_T();
     HANDLE_ERROR(cudaStreamCreate(&stream));
-    MockDynamics tmp_dynamics();
 
     // expect double check rebind
     EXPECT_CALL(*mockCost, bindToStream(testing::_)).Times(1);

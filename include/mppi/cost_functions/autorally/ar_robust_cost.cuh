@@ -38,7 +38,7 @@ public:
   ARRobustCostImpl(cudaStream_t stream = 0);  // : ARStandardCost<PARAMS_T>(steam);
   ~ARRobustCostImpl();
 
-  std::string getCostFunctionName()
+  std::string getCostFunctionName() const override
   {
     return "AutoRally robust cost function";
   }

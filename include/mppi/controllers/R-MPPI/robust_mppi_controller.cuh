@@ -115,7 +115,7 @@ public:
    */
   ~RobustMPPIController();
 
-  std::string getControllerName()
+  std::string getControllerName() const override
   {
     return "Robust MPPI";
   };

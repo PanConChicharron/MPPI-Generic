@@ -50,7 +50,7 @@ public:
 
   void computeControl(const Eigen::Ref<const state_array>& state, int optimization_stride = 1) override;
 
-  std::string getControllerName()
+  std::string getControllerName() const override
   {
     return "Tube MPPI";
   };

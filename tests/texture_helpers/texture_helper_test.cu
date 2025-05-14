@@ -26,6 +26,10 @@ protected:
 class TextureHelperImpl : public TextureHelper<TextureHelperImpl, float4>
 {
 public:
+  using PARENT_CLASS = TextureHelper<TextureHelperImpl, float4>;
+  // THis has been added to avoid compilation warnings about unintended overloading
+  using PARENT_CLASS::freeCudaMem;
+
   TextureHelperImpl(int number, cudaStream_t stream = 0) : TextureHelper<TextureHelperImpl, float4>(number, stream)
   {
   }

@@ -164,7 +164,7 @@ public:
 
 protected:
   // protected constructor so you cannot init without a network setup properly
-  RacerDubinsElevationSuspension(cudaStream_t stream = 0) : PARENT_CLASS(stream = 0)
+  RacerDubinsElevationSuspension(cudaStream_t stream = 0) : PARENT_CLASS(stream)
   {
   }
 };
