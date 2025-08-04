@@ -516,6 +516,10 @@ void checkGPUComputationStep(DYN_T& dynamics, float dt, int max_y_dim, int x_dim
             << "at sample " << point << ", output dim: " << dim << " with y_dim " << y_dim;
         EXPECT_TRUE(isfinite(s_der[point][dim]));
       }
+      if (testing::Test::HasNonfatalFailure())
+      {
+        return;
+      }
     }
   }
 
