@@ -52,19 +52,16 @@ struct RobustMPPIParams : public ControllerParams<S_DIM, C_DIM>
   dim3 eval_dyn_kernel_dim_;
 };
 
-// template <class DYN_T, class COST_T, class FB_T, int NUM_ROLLOUTS = 2560, int BDIM_X = 64,
-//           int BDIM_Y = 1, class PARAMS_T = RobustMPPIParams<DYN_T::STATE_DIM, DYN_T::CONTROL_DIM>,
-//           int SAMPLES_PER_CONDITION_MULTIPLIER = 1>
-template <class DYN_T, class COST_T, class FB_T, int NUM_ROLLOUTS = 2560,
+template <class DYN_T, class COST_T, class FB_T,
           class SAMPLING_T = ::mppi::sampling_distributions::GaussianDistribution<typename DYN_T::DYN_PARAMS_T>,
           class PARAMS_T = RobustMPPIParams<DYN_T::STATE_DIM, DYN_T::CONTROL_DIM>>
-class RobustMPPIController : public Controller<DYN_T, COST_T, FB_T, SAMPLING_T, NUM_ROLLOUTS, PARAMS_T>
+class RobustMPPIController : public Controller<DYN_T, COST_T, FB_T, SAMPLING_T, PARAMS_T>
 {
 public:
   /**
    * Set up useful types
    */
-  typedef Controller<DYN_T, COST_T, FB_T, SAMPLING_T, NUM_ROLLOUTS, PARAMS_T> PARENT_CLASS;
+  typedef Controller<DYN_T, COST_T, FB_T, SAMPLING_T, PARAMS_T> PARENT_CLASS;
 
   using control_array = typename PARENT_CLASS::control_array;
   using control_trajectory = typename PARENT_CLASS::control_trajectory;
@@ -103,7 +100,7 @@ public:
    */
   RobustMPPIController(
       DYN_T* model, COST_T* cost, FB_T* fb_controller, SAMPLING_T* sampler, float dt, int max_iter, float lambda,
-      float alpha, float value_function_threshold, int num_timesteps,
+      float alpha, float value_function_threshold, int num_timesteps, int num_rollouts,
       const Eigen::Ref<const control_trajectory>& init_control_traj = control_trajectory::Zero(DYN_T::CONTROL_DIM, 1),
       int num_candidate_nominal_states = 9, int optimization_stride = 1, cudaStream_t stream = nullptr);
 

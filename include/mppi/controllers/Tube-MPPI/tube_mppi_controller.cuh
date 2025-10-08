@@ -20,17 +20,17 @@ struct TubeMPPIParams : public ControllerParams<S_DIM, C_DIM>
   float nominal_threshold_ = 20;  // How much worse the actual system has to be compared to the nominal
 };
 
-template <class DYN_T, class COST_T, class FB_T, int NUM_ROLLOUTS,
+template <class DYN_T, class COST_T, class FB_T,
           class SAMPLING_T = ::mppi::sampling_distributions::GaussianDistribution<typename DYN_T::DYN_PARAMS_T>,
           class PARAMS_T = TubeMPPIParams<DYN_T::STATE_DIM, DYN_T::CONTROL_DIM>>
-class TubeMPPIController : public Controller<DYN_T, COST_T, FB_T, SAMPLING_T, NUM_ROLLOUTS, PARAMS_T>
+class TubeMPPIController : public Controller<DYN_T, COST_T, FB_T, SAMPLING_T, PARAMS_T>
 {
 public:
   //    EIGEN_MAKE_ALIGNED_OPERATOR_NEW unnecessary due to EIGEN_MAX_ALIGN_BYTES=0
   /**
    * Set up useful types
    */
-  typedef Controller<DYN_T, COST_T, FB_T, SAMPLING_T, NUM_ROLLOUTS, PARAMS_T> PARENT_CLASS;
+  typedef Controller<DYN_T, COST_T, FB_T, SAMPLING_T, PARAMS_T> PARENT_CLASS;
   using control_array = typename PARENT_CLASS::control_array;
   using control_trajectory = typename PARENT_CLASS::control_trajectory;
   using state_trajectory = typename PARENT_CLASS::state_trajectory;
@@ -42,7 +42,7 @@ public:
 
   TubeMPPIController(
       DYN_T* model, COST_T* cost, FB_T* fb_controller, SAMPLING_T* sampler, float dt, int max_iter, float lambda,
-      float alpha, int num_timesteps,
+      float alpha, int num_timesteps, int num_rollouts,
       const Eigen::Ref<const control_trajectory>& init_control_traj = control_trajectory::Zero(DYN_T::CONTROL_DIM, 1),
       cudaStream_t stream = nullptr);
 

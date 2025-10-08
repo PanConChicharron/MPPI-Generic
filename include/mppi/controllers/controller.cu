@@ -1,8 +1,8 @@
 #include <mppi/controllers/controller.cuh>
 
 #define CONTROLLER_TEMPLATE                                                                                            \
-  template <class DYN_T, class COST_T, class FB_T, class SAMPLING_T, int NUM_ROLLOUTS, class PARAMS_T>
-#define CONTROLLER Controller<DYN_T, COST_T, FB_T, SAMPLING_T, NUM_ROLLOUTS, PARAMS_T>
+  template <class DYN_T, class COST_T, class FB_T, class SAMPLING_T, class PARAMS_T>
+#define CONTROLLER Controller<DYN_T, COST_T, FB_T, SAMPLING_T, PARAMS_T>
 
 CONTROLLER_TEMPLATE
 void CONTROLLER::deallocateCUDAMemory()
@@ -61,7 +61,7 @@ void CONTROLLER::copySampledControlFromDevice(bool synchronize)
     return;
   }
 
-  int num_sampled_trajectories = perc_sampled_control_trajectories_ * NUM_ROLLOUTS;
+  int num_sampled_trajectories = perc_sampled_control_trajectories_ * getNumRollouts();
   std::vector<int> samples(num_sampled_trajectories);
   if (perc_sampled_control_trajectories_ > 0.98)
   {
@@ -72,7 +72,7 @@ void CONTROLLER::copySampledControlFromDevice(bool synchronize)
   {
     // Create sample list without replacement
     // removes the top 2% since top 1% are complete noise
-    samples = mppi::math::sample_without_replacement(num_sampled_trajectories, NUM_ROLLOUTS * 0.98);
+    samples = mppi::math::sample_without_replacement(num_sampled_trajectories, getNumRollouts() * 0.98);
   }
 
   // this explicitly adds the optimized control sequence
@@ -133,7 +133,7 @@ void CONTROLLER::copyTopControlFromDevice(bool synchronize)
   }
 
   // Important note: Highest weighted trajectories are the ones with the lowest cost
-  int start_top_control_traj_index = perc_sampled_control_trajectories_ * NUM_ROLLOUTS;
+  int start_top_control_traj_index = perc_sampled_control_trajectories_ * getNumRollouts();
   std::vector<int> samples(num_top_control_trajectories_);
   // Start by filling in the top samples list with the first n in the trajectory
   for (int i = 0; i < num_top_control_trajectories_; i++)
@@ -147,7 +147,7 @@ void CONTROLLER::copyTopControlFromDevice(bool synchronize)
   std::tie(min_sample_index, min_sample_value) = findMinIndexAndValue(samples);
 
   // find top n samples by removing the smallest weights from the list
-  for (int i = num_top_control_trajectories_; i < NUM_ROLLOUTS; i++)
+  for (int i = num_top_control_trajectories_; i < getNumRollouts(); i++)
   {
     if (trajectory_costs_[i] > min_sample_value)
     {  // Remove the smallest weight in the current list and add the new index
@@ -230,8 +230,8 @@ void CONTROLLER::allocateCUDAMemoryHelper(const int num_systems)
   // HANDLE_ERROR(cudaMalloc((void**)&control_d_, sizeof(float) * DYN_T::CONTROL_DIM * getNumTimesteps() *
   // num_systems));
   HANDLE_ERROR(cudaMalloc((void**)&output_d_,
-                          sizeof(float) * DYN_T::OUTPUT_DIM * getNumTimesteps() * NUM_ROLLOUTS * num_systems));
-  HANDLE_ERROR(cudaMalloc((void**)&trajectory_costs_d_, sizeof(float) * NUM_ROLLOUTS * num_systems));
+                          sizeof(float) * DYN_T::OUTPUT_DIM * getNumTimesteps() * getNumRollouts() * num_systems));
+  HANDLE_ERROR(cudaMalloc((void**)&trajectory_costs_d_, sizeof(float) * getNumRollouts() * num_systems));
   HANDLE_ERROR(cudaMalloc((void**)&cost_baseline_and_norm_d_, sizeof(float2) * num_systems));
   cost_baseline_and_norm_.resize(num_systems, make_float2(0.0, 0.0));
   CUDA_mem_init_ = true;
@@ -240,7 +240,7 @@ void CONTROLLER::allocateCUDAMemoryHelper(const int num_systems)
 CONTROLLER_TEMPLATE
 void CONTROLLER::resizeSampledControlTrajectories(float perc, int multiplier, int top_num)
 {
-  int num_sampled_trajectories = perc * NUM_ROLLOUTS + top_num;
+  int num_sampled_trajectories = perc * getNumRollouts() + top_num;
 
   if (sampled_states_CUDA_mem_init_)
   {
@@ -273,10 +273,10 @@ void CONTROLLER::resizeSampledControlTrajectories(float perc, int multiplier, in
 CONTROLLER_TEMPLATE
 std::vector<float> CONTROLLER::getSampledNoise()
 {
-  std::vector<float> vector = std::vector<float>(NUM_ROLLOUTS * getNumTimesteps() * DYN_T::CONTROL_DIM, FLT_MIN);
+  std::vector<float> vector = std::vector<float>(getNumRollouts() * getNumTimesteps() * DYN_T::CONTROL_DIM, FLT_MIN);
 
   HANDLE_ERROR(cudaMemcpyAsync(vector.data(), this->sampler_->getControlSample(0, 0, 0),
-                               sizeof(float) * NUM_ROLLOUTS * getNumTimesteps() * DYN_T::CONTROL_DIM,
+                               sizeof(float) * getNumRollouts() * getNumTimesteps() * DYN_T::CONTROL_DIM,
                                cudaMemcpyDeviceToHost, stream_));
   HANDLE_ERROR(cudaStreamSynchronize(stream_));
   return vector;
