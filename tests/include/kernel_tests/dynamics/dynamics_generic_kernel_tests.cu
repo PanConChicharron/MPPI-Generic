@@ -326,10 +326,11 @@ __global__ void stepTestKernel(DYNAMICS_T* dynamics, float* state, float* contro
   float* x_next = next_state + (tid * DYNAMICS_T::STATE_DIM);
   float* u = control + (tid * DYNAMICS_T::CONTROL_DIM);
   float* y = output + (tid * DYNAMICS_T::OUTPUT_DIM);
+  __syncthreads();
 
   if (tid < num)
   {
-    dynamics->initializeDynamics(state, control, output, theta, 0.0f, dt);
+    dynamics->initializeDynamics(x, u, y, theta, 0.0f, dt);
   }
   __syncthreads();
 
@@ -480,6 +481,7 @@ void checkGPUComputationStep(DYN_T& dynamics, float dt, int max_y_dim, int x_dim
       typename DYN_T::output_array output_array_cpu = DYN_T::output_array::Zero();
       dynamics.initializeDynamics(state, control, output_array_cpu, 0, dt);
 
+      dynamics.enforceConstraints(state, control);
       dynamics.step(state, next_state, state_der_cpu, control, output_array_cpu, 0.0f, dt);
 
       for (int dim = 0; dim < DYN_T::STATE_DIM; dim++)
@@ -504,7 +506,7 @@ void checkGPUComputationStep(DYN_T& dynamics, float dt, int max_y_dim, int x_dim
       {
         EXPECT_NEAR(next_state(dim), s_next[point][dim], tol)
             << "at sample " << point << ", next state dim: " << dim << " with y_dim " << y_dim;
-        EXPECT_TRUE(isfinite(s[point][dim]));
+        EXPECT_TRUE(isfinite(s_next[point][dim]));
       }
       for (int dim = 0; dim < DYN_T::OUTPUT_DIM; dim++)
       {
@@ -514,7 +516,7 @@ void checkGPUComputationStep(DYN_T& dynamics, float dt, int max_y_dim, int x_dim
         }
         EXPECT_NEAR(output_array_cpu(dim), output[point][dim], tol * 1000)  // TODO this is a stupid hack
             << "at sample " << point << ", output dim: " << dim << " with y_dim " << y_dim;
-        EXPECT_TRUE(isfinite(s_der[point][dim]));
+        EXPECT_TRUE(isfinite(output[point][dim]));
       }
       if (testing::Test::HasNonfatalFailure())
       {

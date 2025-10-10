@@ -113,49 +113,17 @@ TEST(DubinsDynamics, TestDynamicsGPU)
   dynamics.freeCudaMem();
 }
 
-TEST(DubinsDynamics, TestUpdateStateGPU)
+TEST(DubinsDynamics, TestStepCPUvsGPU)
 {
-  DubinsDynamics dynamics = DubinsDynamics();
-  dynamics.GPUSetup();
+  using DYN_T = DubinsDynamics;
+  DYN_T dynamics;
+  typename DYN_T::buffer_trajectory buffer;
+  std::vector<int> x_sizes = { 1, 2, 4, 8, 16, 32 };
 
-  DubinsDynamics::state_array state;
-  state(0) = 0.5;
-  state(1) = 0.7;
-  state(2) = M_PI;
-  DubinsDynamics::control_array control;
-  control(0) = 3.0;
-  control(1) = 2.0;
-
-  std::vector<std::array<float, 3>> s(1);
-  for (int dim = 0; dim < 3; dim++)
+  for (const auto& x_dim : x_sizes)
   {
-    s[0][dim] = state(dim);
+    checkGPUComputationStep<DYN_T>(dynamics, 0.1f, 32, x_dim, buffer);
   }
-  std::vector<std::array<float, 3>> s_der(1);
-  // steering, throttle
-  std::vector<std::array<float, 2>> u(1);
-  for (int dim = 0; dim < 2; dim++)
-  {
-    u[0][dim] = control(dim);
-  }
-
-  // These variables will be changed so initialized to the right size only
-  DubinsDynamics::state_array state_der_cpu = DubinsDynamics::state_array::Zero();
-
-  // Run dynamics on dynamicsU
-  dynamics.computeDynamics(state, control, state_der_cpu);
-  dynamics.updateState(state, state_der_cpu, 0.1f);
-  // Run dynamics on GPU
-  for (int y_dim = 1; y_dim <= 3; y_dim++)
-  {
-    launchComputeStateDerivTestKernel<DubinsDynamics, 3, 2>(dynamics, s, u, s_der, y_dim);
-    launchUpdateStateTestKernel<DubinsDynamics, 3>(dynamics, s, s_der, 0.1f, y_dim);
-    for (int dim = 0; dim < 3; dim++)
-    {
-      EXPECT_FLOAT_EQ(state_der_cpu(dim), s_der[0][dim]);
-    }
-  }
-  dynamics.freeCudaMem();
 }
 
 class DubinsDummy : public DubinsDynamics

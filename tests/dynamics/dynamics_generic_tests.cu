@@ -507,34 +507,15 @@ TEST(Dynamics, computeStateDerivGPU)
   }
 }
 
-TEST(Dynamics, stepGPU)
+TEST(Dynamics, stepGPUvsCPU)
 {
-  DynamicsTester<2, 1> tester;
-  tester.GPUSetup();
-  std::vector<std::array<float, 2>> s(1);
-  std::vector<std::array<float, 1>> u(1);
-  std::vector<std::array<float, 2>> s_der(1);
-  std::vector<std::array<float, 2>> s_next(1);
-  int t = 0;
-  float dt = 0.5;
-
-  for (int dim_y = 1; dim_y < 6; dim_y++)
+  using DYN_T = DynamicsTester<2, 1>;
+  DYN_T tester;
+  typename DYN_T::buffer_trajectory buffer;
+  std::vector<int> x_sizes = { 1, 2, 4, 8, 16, 32 };
+  for (const auto& x_dim : x_sizes)
   {
-    s[0][0] = 5;
-    s[0][1] = 10;
-    s_der[0][0] = 10;
-    s_der[0][1] = 20;
-    u[0][0] = 3;
-
-    launchStepTestKernel<DynamicsTester<2, 1>>(tester, s, u, s_der, s_next, t, dt, dim_y);
-
-    EXPECT_FLOAT_EQ(s[0][0], 5) << "dim_y = " << dim_y;
-    EXPECT_FLOAT_EQ(s[0][1], 10) << "dim_y = " << dim_y;
-    EXPECT_FLOAT_EQ(s_der[0][0], 15) << "dim_y = " << dim_y;
-    EXPECT_FLOAT_EQ(s_der[0][1], 3) << "dim_y = " << dim_y;
-    EXPECT_FLOAT_EQ(s_next[0][0], 5 + 7.5) << "dim_y = " << dim_y;
-    EXPECT_FLOAT_EQ(s_next[0][1], 10 + 1.5) << "dim_y = " << dim_y;
-    EXPECT_FLOAT_EQ(u[0][0], 3) << "dim_y = " << dim_y;
+    checkGPUComputationStep<DYN_T>(tester, 0.01, 32, x_dim, buffer);
   }
 }
 
