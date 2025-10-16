@@ -1,8 +1,7 @@
 #include "tube_mppi_controller.cuh"
 #include <mppi/core/mppi_common.cuh>
 
-#define TUBE_MPPI_TEMPLATE                                                                                             \
-  template <class DYN_T, class COST_T, class FB_T, class SAMPLING_T, class PARAMS_T>
+#define TUBE_MPPI_TEMPLATE template <class DYN_T, class COST_T, class FB_T, class SAMPLING_T, class PARAMS_T>
 
 #define TubeMPPI TubeMPPIController<DYN_T, COST_T, FB_T, SAMPLING_T, PARAMS_T>
 
@@ -10,8 +9,8 @@ TUBE_MPPI_TEMPLATE
 TubeMPPI::TubeMPPIController(DYN_T* model, COST_T* cost, FB_T* fb_controller, SAMPLING_T* sampler, float dt,
                              int max_iter, float lambda, float alpha, int num_timesteps, int num_rollouts,
                              const Eigen::Ref<const control_trajectory>& init_control_traj, cudaStream_t stream)
-  : PARENT_CLASS(model, cost, fb_controller, sampler, dt, max_iter, lambda, alpha, num_timesteps, num_rollouts, init_control_traj,
-                 stream)
+  : PARENT_CLASS(model, cost, fb_controller, sampler, dt, max_iter, lambda, alpha, num_timesteps, num_rollouts,
+                 init_control_traj, stream)
 {
   // call rollout kernel with z = 2 since we have a nominal state
   this->params_.dynamics_rollout_dim_.z = max(2, this->params_.dynamics_rollout_dim_.z);
@@ -235,7 +234,8 @@ void TubeMPPI::computeControl(const Eigen::Ref<const state_array>& state, int op
     HANDLE_ERROR(cudaStreamSynchronize(this->stream_));
 
     this->setBaseline(mppi::kernels::computeBaselineCost(this->trajectory_costs_.data(), this->getNumRollouts()), 0);
-    this->setBaseline(mppi::kernels::computeBaselineCost(this->trajectory_costs_nominal_.data(), this->getNumRollouts()), 1);
+    this->setBaseline(
+        mppi::kernels::computeBaselineCost(this->trajectory_costs_nominal_.data(), this->getNumRollouts()), 1);
 
     // Launch the norm exponential kernel for both actual and nominal
     mppi::kernels::launchNormExpKernel(this->getNumRollouts(), this->getNormExpThreads(), this->trajectory_costs_d_,
@@ -252,7 +252,8 @@ void TubeMPPI::computeControl(const Eigen::Ref<const state_array>& state, int op
 
     // Compute the normalizer
     this->setNormalizer(mppi::kernels::computeNormalizer(this->trajectory_costs_.data(), this->getNumRollouts()), 0);
-    this->setNormalizer(mppi::kernels::computeNormalizer(this->trajectory_costs_nominal_.data(), this->getNumRollouts()), 1);
+    this->setNormalizer(
+        mppi::kernels::computeNormalizer(this->trajectory_costs_nominal_.data(), this->getNumRollouts()), 1);
 
     // Compute real free energy
     mppi::kernels::computeFreeEnergy(this->free_energy_statistics_.real_sys.freeEnergyMean,
@@ -265,8 +266,8 @@ void TubeMPPI::computeControl(const Eigen::Ref<const state_array>& state, int op
     mppi::kernels::computeFreeEnergy(this->free_energy_statistics_.nominal_sys.freeEnergyMean,
                                      this->free_energy_statistics_.nominal_sys.freeEnergyVariance,
                                      this->free_energy_statistics_.nominal_sys.freeEnergyModifiedVariance,
-                                     this->trajectory_costs_nominal_.data(), this->getNumRollouts(), this->getBaselineCost(1),
-                                     this->getLambda());
+                                     this->trajectory_costs_nominal_.data(), this->getNumRollouts(),
+                                     this->getBaselineCost(1), this->getLambda());
 
     // Compute the cost weighted average
     this->sampler_->updateDistributionParamsFromDevice(this->trajectory_costs_d_, this->getNormalizerCost(0), 0, false);

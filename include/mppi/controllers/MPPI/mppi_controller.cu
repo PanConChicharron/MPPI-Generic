@@ -6,8 +6,7 @@
 #include <stdexcept>
 #include <string>
 
-#define VANILLA_MPPI_TEMPLATE                                                                                          \
-  template <class DYN_T, class COST_T, class FB_T, class SAMPLING_T, class PARAMS_T>
+#define VANILLA_MPPI_TEMPLATE template <class DYN_T, class COST_T, class FB_T, class SAMPLING_T, class PARAMS_T>
 
 #define VanillaMPPI VanillaMPPIController<DYN_T, COST_T, FB_T, SAMPLING_T, PARAMS_T>
 
@@ -15,8 +14,8 @@ VANILLA_MPPI_TEMPLATE
 VanillaMPPI::VanillaMPPIController(DYN_T* model, COST_T* cost, FB_T* fb_controller, SAMPLING_T* sampler, float dt,
                                    int max_iter, float lambda, float alpha, int num_timesteps, int num_rollouts,
                                    const Eigen::Ref<const control_trajectory>& init_control_traj, cudaStream_t stream)
-  : PARENT_CLASS(model, cost, fb_controller, sampler, dt, max_iter, lambda, alpha, num_timesteps, num_rollouts, init_control_traj,
-                 stream)
+  : PARENT_CLASS(model, cost, fb_controller, sampler, dt, max_iter, lambda, alpha, num_timesteps, num_rollouts,
+                 init_control_traj, stream)
 {
   // Allocate CUDA memory for the controller
   allocateCUDAMemory();

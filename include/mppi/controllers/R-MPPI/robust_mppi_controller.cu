@@ -2,18 +2,18 @@
 #include <Eigen/Eigenvalues>
 #include <exception>
 
-#define ROBUST_MPPI_TEMPLATE                                                                                           \
-  template <class DYN_T, class COST_T, class FB_T, class SAMPLING_T, class PARAMS_T>
+#define ROBUST_MPPI_TEMPLATE template <class DYN_T, class COST_T, class FB_T, class SAMPLING_T, class PARAMS_T>
 
 #define RobustMPPI RobustMPPIController<DYN_T, COST_T, FB_T, SAMPLING_T, PARAMS_T>
 
 ROBUST_MPPI_TEMPLATE
 RobustMPPI::RobustMPPIController(DYN_T* model, COST_T* cost, FB_T* fb_controller, SAMPLING_T* sampler, float dt,
                                  int max_iter, float lambda, float alpha, float value_function_threshold,
-                                 int num_timesteps, int num_rollouts, const Eigen::Ref<const control_trajectory>& init_control_traj,
+                                 int num_timesteps, int num_rollouts,
+                                 const Eigen::Ref<const control_trajectory>& init_control_traj,
                                  int num_candidate_nominal_states, int optimization_stride, cudaStream_t stream)
-  : PARENT_CLASS(model, cost, fb_controller, sampler, dt, max_iter, lambda, alpha, num_timesteps, num_rollouts, init_control_traj,
-                 stream)
+  : PARENT_CLASS(model, cost, fb_controller, sampler, dt, max_iter, lambda, alpha, num_timesteps, num_rollouts,
+                 init_control_traj, stream)
 {
   setValueFunctionThreshold(value_function_threshold);
   setOptimizationStride(optimization_stride);
@@ -166,8 +166,9 @@ void RobustMPPI::chooseAppropriateKernel()
   {
     mppi::kernels::rmppi::launchRMPPIRolloutKernel<DYN_T, COST_T, SAMPLING_T, FEEDBACK_GPU>(
         this->model_, this->cost_, this->sampler_, this->fb_controller_->getHostPointer().get(), this->getDt(),
-        this->getNumTimesteps(), this->getNumRollouts(), this->getLambda(), this->getAlpha(), getValueFunctionThreshold(),
-        this->initial_state_d_, this->trajectory_costs_d_, this->params_.dynamics_rollout_dim_, this->stream_, true);
+        this->getNumTimesteps(), this->getNumRollouts(), this->getLambda(), this->getAlpha(),
+        getValueFunctionThreshold(), this->initial_state_d_, this->trajectory_costs_d_,
+        this->params_.dynamics_rollout_dim_, this->stream_, true);
   }
   auto end_rollout_single_kernel_time = std::chrono::steady_clock::now();
 
@@ -176,9 +177,9 @@ void RobustMPPI::chooseAppropriateKernel()
   {
     mppi::kernels::rmppi::launchSplitRMPPIRolloutKernel<DYN_T, COST_T, SAMPLING_T, FEEDBACK_GPU>(
         this->model_, this->cost_, this->sampler_, this->fb_controller_->getHostPointer().get(), this->getDt(),
-        this->getNumTimesteps(), this->getNumRollouts(), this->getLambda(), this->getAlpha(), getValueFunctionThreshold(),
-        this->initial_state_d_, this->output_d_, this->trajectory_costs_d_, this->params_.dynamics_rollout_dim_,
-        this->params_.cost_rollout_dim_, this->stream_, true);
+        this->getNumTimesteps(), this->getNumRollouts(), this->getLambda(), this->getAlpha(),
+        getValueFunctionThreshold(), this->initial_state_d_, this->output_d_, this->trajectory_costs_d_,
+        this->params_.dynamics_rollout_dim_, this->params_.cost_rollout_dim_, this->stream_, true);
   }
   auto end_rollout_split_kernel_time = std::chrono::steady_clock::now();
 
@@ -446,8 +447,8 @@ void RobustMPPI::updateNumCandidates(int new_num_candidates)
   {
     std::cerr << "ERROR: (number of candidates) * (SAMPLES_PER_CANDIDATE) cannot exceed NUM_ROLLOUTS\n";
     std::cerr << "number of candidates: " << new_num_candidates
-              << ", SAMPLES_PER_CANDIDATE: " << getNumEvalSamplesPerCandidate() << ", NUM_ROLLOUTS: " << this->getNumRollouts()
-              << "\n";
+              << ", SAMPLES_PER_CANDIDATE: " << getNumEvalSamplesPerCandidate()
+              << ", NUM_ROLLOUTS: " << this->getNumRollouts() << "\n";
     std::terminate();
   }
 
@@ -687,21 +688,22 @@ void RobustMPPI::computeControl(const Eigen::Ref<const state_array>& state, int 
     {
       mppi::kernels::rmppi::launchSplitRMPPIRolloutKernel<DYN_T, COST_T, SAMPLING_T, FEEDBACK_GPU>(
           this->model_, this->cost_, this->sampler_, this->fb_controller_->getHostPointer().get(), this->getDt(),
-          this->getNumTimesteps(), this->getNumRollouts(), this->getLambda(), this->getAlpha(), getValueFunctionThreshold(),
-          this->initial_state_d_, this->output_d_, this->trajectory_costs_d_, this->params_.dynamics_rollout_dim_,
-          this->params_.cost_rollout_dim_, this->stream_, false);
+          this->getNumTimesteps(), this->getNumRollouts(), this->getLambda(), this->getAlpha(),
+          getValueFunctionThreshold(), this->initial_state_d_, this->output_d_, this->trajectory_costs_d_,
+          this->params_.dynamics_rollout_dim_, this->params_.cost_rollout_dim_, this->stream_, false);
     }
     else
     {
       mppi::kernels::rmppi::launchRMPPIRolloutKernel<DYN_T, COST_T, SAMPLING_T, FEEDBACK_GPU>(
           this->model_, this->cost_, this->sampler_, this->fb_controller_->getHostPointer().get(), this->getDt(),
-          this->getNumTimesteps(), this->getNumRollouts(), this->getLambda(), this->getAlpha(), getValueFunctionThreshold(),
-          this->initial_state_d_, this->trajectory_costs_d_, this->params_.dynamics_rollout_dim_, this->stream_, false);
+          this->getNumTimesteps(), this->getNumRollouts(), this->getLambda(), this->getAlpha(),
+          getValueFunctionThreshold(), this->initial_state_d_, this->trajectory_costs_d_,
+          this->params_.dynamics_rollout_dim_, this->stream_, false);
     }
 
     // Return the costs ->  nominal,  real costs
-    HANDLE_ERROR(cudaMemcpyAsync(this->trajectory_costs_.data(), trajectory_costs_real_d, this->getNumRollouts() * sizeof(float),
-                                 cudaMemcpyDeviceToHost, this->stream_));
+    HANDLE_ERROR(cudaMemcpyAsync(this->trajectory_costs_.data(), trajectory_costs_real_d,
+                                 this->getNumRollouts() * sizeof(float), cudaMemcpyDeviceToHost, this->stream_));
     HANDLE_ERROR(cudaMemcpyAsync(trajectory_costs_nominal_.data(), trajectory_costs_nominal_d,
                                  this->getNumRollouts() * sizeof(float), cudaMemcpyDeviceToHost, this->stream_));
     HANDLE_ERROR(cudaStreamSynchronize(this->stream_));
@@ -716,8 +718,8 @@ void RobustMPPI::computeControl(const Eigen::Ref<const state_array>& state, int 
     mppi::kernels::launchNormExpKernel(this->getNumRollouts(), this->getNormExpThreads(), trajectory_costs_real_d,
                                        1.0 / this->getLambda(), this->getBaselineCost(1), this->stream_, false);
 
-    HANDLE_ERROR(cudaMemcpyAsync(this->trajectory_costs_.data(), trajectory_costs_real_d, this->getNumRollouts() * sizeof(float),
-                                 cudaMemcpyDeviceToHost, this->stream_));
+    HANDLE_ERROR(cudaMemcpyAsync(this->trajectory_costs_.data(), trajectory_costs_real_d,
+                                 this->getNumRollouts() * sizeof(float), cudaMemcpyDeviceToHost, this->stream_));
     HANDLE_ERROR(cudaMemcpyAsync(trajectory_costs_nominal_.data(), trajectory_costs_nominal_d,
                                  this->getNumRollouts() * sizeof(float), cudaMemcpyDeviceToHost, this->stream_));
     HANDLE_ERROR(cudaStreamSynchronize(this->stream_));
@@ -737,8 +739,8 @@ void RobustMPPI::computeControl(const Eigen::Ref<const state_array>& state, int 
     mppi::kernels::computeFreeEnergy(this->free_energy_statistics_.nominal_sys.freeEnergyMean,
                                      this->free_energy_statistics_.nominal_sys.freeEnergyVariance,
                                      this->free_energy_statistics_.nominal_sys.freeEnergyModifiedVariance,
-                                     this->trajectory_costs_nominal_.data(), this->getNumRollouts(), this->getBaselineCost(0),
-                                     this->getLambda());
+                                     this->trajectory_costs_nominal_.data(), this->getNumRollouts(),
+                                     this->getBaselineCost(0), this->getLambda());
 
     // Calculate new optimal trajectories
     this->sampler_->updateDistributionParamsFromDevice(trajectory_costs_nominal_d, this->getNormalizerCost(0), 0,

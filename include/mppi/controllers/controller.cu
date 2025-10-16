@@ -1,7 +1,6 @@
 #include <mppi/controllers/controller.cuh>
 
-#define CONTROLLER_TEMPLATE                                                                                            \
-  template <class DYN_T, class COST_T, class FB_T, class SAMPLING_T, class PARAMS_T>
+#define CONTROLLER_TEMPLATE template <class DYN_T, class COST_T, class FB_T, class SAMPLING_T, class PARAMS_T>
 #define CONTROLLER Controller<DYN_T, COST_T, FB_T, SAMPLING_T, PARAMS_T>
 
 CONTROLLER_TEMPLATE

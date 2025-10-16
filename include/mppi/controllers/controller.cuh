@@ -679,7 +679,8 @@ public:
   {
     if (num_rollouts <= 0)
     {
-      this->logger_->error("Attempted to change number of samples to %d. The number of samples must be greater than 0.\n");
+      this->logger_->error(
+          "Attempted to change number of samples to %d. The number of samples must be greater than 0.\n");
       return;
     }
 

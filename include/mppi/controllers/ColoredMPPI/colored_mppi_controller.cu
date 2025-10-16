@@ -4,18 +4,16 @@
 #include <iostream>
 #include <mppi/sampling_distributions/colored_noise/colored_noise.cuh>
 
-#define ColoredMPPI_TEMPLATE                                                                                           \
-  template <class DYN_T, class COST_T, class FB_T, class SAMPLING_T, class PARAMS_T>
+#define ColoredMPPI_TEMPLATE template <class DYN_T, class COST_T, class FB_T, class SAMPLING_T, class PARAMS_T>
 #define ColoredMPPI ColoredMPPIController<DYN_T, COST_T, FB_T, SAMPLING_T, PARAMS_T>
 
 ColoredMPPI_TEMPLATE ColoredMPPI::ColoredMPPIController(DYN_T* model, COST_T* cost, FB_T* fb_controller,
                                                         SAMPLING_T* sampler, float dt, int max_iter, float lambda,
-                                                        float alpha, int num_timesteps,
-                                                        int num_rollouts,
+                                                        float alpha, int num_timesteps, int num_rollouts,
                                                         const Eigen::Ref<const control_trajectory>& init_control_traj,
                                                         cudaStream_t stream)
-  : PARENT_CLASS(model, cost, fb_controller, sampler, dt, max_iter, lambda, alpha, num_timesteps, num_rollouts, init_control_traj,
-                 stream)
+  : PARENT_CLASS(model, cost, fb_controller, sampler, dt, max_iter, lambda, alpha, num_timesteps, num_rollouts,
+                 init_control_traj, stream)
 {
   // Allocate CUDA memory for the controller
   allocateCUDAMemory();
@@ -203,8 +201,8 @@ ColoredMPPI_TEMPLATE void ColoredMPPI::computeControl(const Eigen::Ref<const sta
     }
     else
     {
-      mppi::kernels::launchTsallisKernel(this->getNumRollouts(), this->getNormExpThreads(), this->trajectory_costs_d_, getGamma(),
-                                         getRExp(), this->getBaselineCost(), this->stream_, false);
+      mppi::kernels::launchTsallisKernel(this->getNumRollouts(), this->getNormExpThreads(), this->trajectory_costs_d_,
+                                         getGamma(), getRExp(), this->getBaselineCost(), this->stream_, false);
     }
     HANDLE_ERROR(cudaMemcpyAsync(this->trajectory_costs_.data(), this->trajectory_costs_d_,
                                  this->getNumRollouts() * sizeof(float), cudaMemcpyDeviceToHost, this->stream_));
