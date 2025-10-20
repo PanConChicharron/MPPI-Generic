@@ -3,6 +3,6 @@
 typedef mppi::sampling_distributions::GaussianDistribution<QuadrotorDynamics::DYN_PARAMS_T> Sampler;
 
 template class VanillaMPPIController<QuadrotorDynamics, QuadrotorQuadraticCost, DDPFeedback<QuadrotorDynamics>,
-                                     512, Sampler>;
-template class VanillaMPPIController<QuadrotorDynamics, QuadrotorMapCost, DDPFeedback<QuadrotorDynamics>, 512,
+                                     Sampler>;
+template class VanillaMPPIController<QuadrotorDynamics, QuadrotorMapCost, DDPFeedback<QuadrotorDynamics>,
                                      Sampler>;

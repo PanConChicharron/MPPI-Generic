@@ -54,7 +54,7 @@ struct ControllerParams
   // MAX_TIMESTEPS is defined as an upper bound, if lower that region is just ignored when calculating control
   // does not reallocate cuda memory
   int num_timesteps_ = 1;
-  int num_rollouts_ = 128;
+  int num_rollouts_ = 1;
   int num_iters_ = 1;  // Number of optimization iterations
   unsigned seed_ = std::chrono::system_clock::now().time_since_epoch().count();
 
@@ -122,7 +122,6 @@ public:
     auto logger = std::make_shared<mppi::util::MPPILogger>();
     setLogger(logger);
 
-    sampler_->setNumRollouts(num_rollouts);
     sampler_->setNumDistributions(1);
     TEMPLATED_PARAMS params;
     params.dt_ = dt;
@@ -130,7 +129,8 @@ public:
     params.lambda_ = lambda;
     params.alpha_ = alpha;
     params.num_timesteps_ = num_timesteps;
-    setNumTimesteps(params.num_timesteps_);
+    params.num_rollouts_ = num_rollouts;
+    // setNumTimesteps(params.num_timesteps_);
 
     // Set initial control in temp params
     resizeTimeTrajectory<DYN_T::CONTROL_DIM>(params.init_control_traj_, num_timesteps);
@@ -142,8 +142,8 @@ public:
         params.init_control_traj_.col(i) = init_control_traj.col(init_control_traj.cols() - 1);
       }
     }
-    setTrajectoriesToZero();
     setParams(params);
+    setTrajectoriesToZero();
 
     control_ = params.init_control_traj_;
     control_history_ = Eigen::Matrix<float, DYN_T::CONTROL_DIM, 2>::Zero();
@@ -174,11 +174,10 @@ public:
     auto logger = std::make_shared<mppi::util::MPPILogger>();
     setLogger(logger);
 
-    sampler_->setNumRollouts(params_.num_rollouts_);
     sampler_->setNumDistributions(1);
-    setNumTimesteps(params_.num_timesteps_);
-    setTrajectoriesToZero();
+    // setNumTimesteps(params_.num_timesteps_);
     setParams(params);
+    setTrajectoriesToZero();
     control_ = params_.init_control_traj_;
     control_history_ = Eigen::Matrix<float, DYN_T::CONTROL_DIM, 2>::Zero();
 
@@ -675,7 +674,7 @@ public:
     }
   }
 
-  void setNumRolloutsInternal(const int num_rollouts, const bool update_gpu_mem = true)
+  virtual void setNumRolloutsHelper(const int num_rollouts, const bool update_gpu_mem = true)
   {
     if (num_rollouts <= 0)
     {
@@ -686,7 +685,7 @@ public:
 
     params_.num_rollouts_ = num_rollouts;
     Eigen::NoChange_t same_col = Eigen::NoChange_t::NoChange;
-    trajectory_costs_.conservativeResize(num_rollouts, same_row);
+    trajectory_costs_.conservativeResize(num_rollouts, same_col);
     sampler_->setNumRollouts(num_rollouts);
     if (CUDA_mem_init_ && update_gpu_mem)
     {
@@ -698,10 +697,10 @@ public:
 
   virtual void setNumRollouts(const int num_rollouts)
   {
-    setNumRolloutsInternal(num_rollouts, true);
+    setNumRolloutsHelper(num_rollouts, true);
   }
 
-  void setNumTimestepsInternal(const int num_timesteps, const bool update_gpu_mem = true)
+  virtual void setNumTimestepsHelper(const int num_timesteps, const bool update_gpu_mem = true)
   {
     if (num_timesteps <= 0)
     {
@@ -742,7 +741,7 @@ public:
 
   virtual void setNumTimesteps(const int num_timesteps)
   {
-    setNumTimestepsInternal(num_timesteps, true);
+    setNumTimestepsHelper(num_timesteps, true);
   }
 
   template <int DIM = 1, class T = float>
@@ -763,7 +762,7 @@ public:
     // output_.conservativeResize(Eigen::NoChange_t, num_timesteps);
     // propagated_feedback_state_trajectory_.conservativeResize(Eigen::NoChange_t, num_timesteps);
     // trajectory_costs_.conservativeResize(Eigen::NoChange_t, num_timesteps);
-    int num_timesteps = control_.cols();
+    const int num_timesteps = getNumTimesteps();
     for (int i = 0; i < num_timesteps; i++)
     {
       control_.col(i) = model_->getZeroControl();
@@ -948,7 +947,7 @@ public:
     params_ = p;
     if (change_num_timesteps)
     {
-      setNumTimesteps(p.num_timesteps_, false);
+      setNumTimestepsHelper(p.num_timesteps_, false);
     }
     if (change_seed)
     {
@@ -956,7 +955,7 @@ public:
     }
     if (change_num_rollouts)
     {
-      setNumRollouts(p.num_rollouts_, false);
+      setNumRolloutsHelper(p.num_rollouts_, false);
     }
 
     if ((change_num_rollouts || change_num_timesteps) && CUDA_mem_init_)

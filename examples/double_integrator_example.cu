@@ -66,8 +66,8 @@ int main()
   int max_iter = 1;
   int total_time_horizon = 300;
 
-  auto controller = VanillaMPPIController<DYN, COST, FB_CONTROLLER, NUM_ROLLOUTS, SAMPLER>(
-      &model, &cost, &fb_controller, &sampler, dt, max_iter, lambda, alpha, TIMESTEPS);
+  auto controller = VanillaMPPIController<DYN, COST, FB_CONTROLLER, SAMPLER>(
+      &model, &cost, &fb_controller, &sampler, dt, max_iter, lambda, alpha, TIMESTEPS, NUM_ROLLOUTS);
 
   auto controller_params = controller.getParams();
   controller_params.dynamics_rollout_dim_ = dim3(64, 1, 1);

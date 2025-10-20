@@ -24,18 +24,10 @@ template class mppi::sampling_distributions::SamplingDistribution<
     SAMPLER_T, mppi::sampling_distributions::GaussianParams, CartpoleDynamics::DYN_PARAMS_T>;
 
 template class Controller<CartpoleDynamics, CartpoleQuadraticCost, DDPFeedback<CartpoleDynamics>,
-                          SAMPLER_T, 2048>;
-template class Controller<CartpoleDynamics, CartpoleQuadraticCost, DDPFeedback<CartpoleDynamics>,
-                          SAMPLER_T, 256>;
-template class Controller<CartpoleDynamics, CartpoleQuadraticCost, DDPFeedback<CartpoleDynamics>, SAMPLER_T,
-                          512>;
+                          SAMPLER_T>;
 
 template class VanillaMPPIController<CartpoleDynamics, CartpoleQuadraticCost,
-                                     DDPFeedback<CartpoleDynamics>, 2048>;
-template class VanillaMPPIController<CartpoleDynamics, CartpoleQuadraticCost,
-                                     DDPFeedback<CartpoleDynamics>, 256>;
-template class VanillaMPPIController<CartpoleDynamics, CartpoleQuadraticCost, DDPFeedback<CartpoleDynamics>,
-                                     512>;
+                                     DDPFeedback<CartpoleDynamics>>;
 
 #undef SAMPLER_T
 // template class TubeMPPIController<CartpoleDynamics, CartpoleQuadraticCost,

@@ -237,7 +237,9 @@ public:
 
   void setParams(const PARAMS_T& p);
 
-  void setNumTimesteps(const int num_timesteps) override;
+  void setNumTimestepsHelper(const int num_timesteps, const bool update_gpu_mem = true) override;
+
+  void setNumRolloutsHelper(const int num_timesteps, const bool update_gpu_mem = true) override;
 
   void calculateSampledStateTrajectories() override;
 

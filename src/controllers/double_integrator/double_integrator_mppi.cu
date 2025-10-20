@@ -9,11 +9,7 @@
 typedef mppi::sampling_distributions::GaussianDistribution<DoubleIntegratorDynamics::DYN_PARAMS_T> Sampler;
 
 template class VanillaMPPIController<DoubleIntegratorDynamics, DoubleIntegratorCircleCost,
-                                     DDPFeedback<DoubleIntegratorDynamics>, 512, Sampler>;
-template class VanillaMPPIController<DoubleIntegratorDynamics, DoubleIntegratorCircleCost,
-                                     DDPFeedback<DoubleIntegratorDynamics>, 1024, Sampler>;
+                                     DDPFeedback<DoubleIntegratorDynamics>, Sampler>;
 
 template class TubeMPPIController<DoubleIntegratorDynamics, DoubleIntegratorCircleCost,
-                                  DDPFeedback<DoubleIntegratorDynamics>, 512, Sampler>;
-template class TubeMPPIController<DoubleIntegratorDynamics, DoubleIntegratorCircleCost,
-                                  DDPFeedback<DoubleIntegratorDynamics>, 1024, Sampler>;
+                                  DDPFeedback<DoubleIntegratorDynamics>, Sampler>;

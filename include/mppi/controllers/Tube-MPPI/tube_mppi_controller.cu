@@ -17,8 +17,11 @@ TubeMPPI::TubeMPPIController(DYN_T* model, COST_T* cost, FB_T* fb_controller, SA
   this->params_.cost_rollout_dim_.z = max(2, this->params_.cost_rollout_dim_.z);
   this->sampler_->setNumDistributions(2);
 
+  // Properly size nominal variables
+  setNumTimestepsHelper(this->getNumTimesteps(), false);
+  setNumRolloutsHelper(this->getNumRollouts(), false);
+
   // Zero the nominal trajectories
-  setNumTimesteps(this->getNumTimesteps());  // Sets nominal trajectores to proper size
   nominal_state_trajectory_.setZero();
   nominal_state_trajectory_.setZero();
   nominal_control_trajectory_ = this->params_.init_control_traj_;
@@ -43,8 +46,11 @@ TubeMPPI::TubeMPPIController(DYN_T* model, COST_T* cost, FB_T* fb_controller, SA
   this->params_.cost_rollout_dim_.z = max(2, this->params_.cost_rollout_dim_.z);
   this->sampler_->setNumDistributions(2);
 
+  // Properly size nominal variables
+  setNumTimestepsHelper(this->getNumTimesteps(), false);
+  setNumRolloutsHelper(this->getNumRollouts(), false);
+
   // Zero the nominal trajectories
-  setNumTimesteps(this->getNumTimesteps());  // Sets nominal trajectores to proper size
   nominal_state_trajectory_.setZero();
   nominal_state_trajectory_.setZero();
   nominal_control_trajectory_ = this->params_.init_control_traj_;
@@ -163,12 +169,21 @@ void TubeMPPI::chooseAppropriateKernel()
 }
 
 TUBE_MPPI_TEMPLATE
-void TubeMPPI::setNumTimesteps(const int num_timesteps)
+void TubeMPPI::setNumTimestepsHelper(const int num_timesteps, const bool update_gpu_mem)
 {
-  PARENT_CLASS::setNumTimesteps(num_timesteps);
+  PARENT_CLASS::setNumTimestepsHelper(num_timesteps, update_gpu_mem);
   // Set up nominal trajectories
   PARENT_CLASS::resizeTimeTrajectory(nominal_control_trajectory_, num_timesteps);
   PARENT_CLASS::resizeTimeTrajectory(nominal_state_trajectory_, num_timesteps);
+}
+
+TUBE_MPPI_TEMPLATE
+void TubeMPPI::setNumRolloutsHelper(const int num_rollouts, const bool update_gpu_mem)
+{
+  PARENT_CLASS::setNumRolloutsHelper(num_rollouts, update_gpu_mem);
+  // Set up nominal trajectories
+  Eigen::NoChange_t same_col = Eigen::NoChange_t::NoChange;
+  trajectory_costs_nominal_.conservativeResize(num_rollouts, same_col);
 }
 
 TUBE_MPPI_TEMPLATE

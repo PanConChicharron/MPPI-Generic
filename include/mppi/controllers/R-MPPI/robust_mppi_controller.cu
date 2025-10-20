@@ -22,8 +22,11 @@ RobustMPPI::RobustMPPIController(DYN_T* model, COST_T* cost, FB_T* fb_controller
   setParams(this->params_);
   this->sampler_->setNumDistributions(2);
 
+  // Properly size nominal variables
+  setNumTimestepsHelper(this->getNumTimesteps(), false);
+  setNumRolloutsHelper(this->getNumRollouts(), false);
+
   // Zero the nominal trajectories
-  setNumTimesteps(this->getNumTimesteps());  // Sets nominal trajectores to proper size
   nominal_state_trajectory_.setZero();
   trajectory_costs_nominal_.setZero();
 
@@ -56,8 +59,11 @@ RobustMPPI::RobustMPPIController(DYN_T* model, COST_T* cost, FB_T* fb_controller
   setParams(params);
   this->sampler_->setNumDistributions(2);
 
+  // Properly size nominal variables
+  setNumTimestepsHelper(this->getNumTimesteps(), false);
+  setNumRolloutsHelper(this->getNumRollouts(), false);
+
   // Zero the nominal trajectories
-  setNumTimesteps(this->getNumTimesteps());  // Sets nominal trajectores to proper size
   nominal_state_trajectory_.setZero();
   trajectory_costs_nominal_.setZero();
 
@@ -320,13 +326,22 @@ void RobustMPPI::chooseAppropriateEvalKernel()
 }
 
 ROBUST_MPPI_TEMPLATE
-void RobustMPPI::setNumTimesteps(const int num_timesteps)
+void RobustMPPI::setNumTimestepsHelper(const int num_timesteps, const bool update_gpu_mem)
 {
-  PARENT_CLASS::setNumTimesteps(num_timesteps);
+  PARENT_CLASS::setNumTimestepsHelper(num_timesteps, update_gpu_mem);
   // Set up nominal trajectories
   PARENT_CLASS::resizeTimeTrajectory(nominal_control_trajectory_, num_timesteps);
   PARENT_CLASS::resizeTimeTrajectory(nominal_state_trajectory_, num_timesteps);
   resetCandidateCudaMem();
+}
+
+ROBUST_MPPI_TEMPLATE
+void RobustMPPI::setNumRolloutsHelper(const int num_rollouts, const bool update_gpu_mem)
+{
+  PARENT_CLASS::setNumRolloutsHelper(num_rollouts, update_gpu_mem);
+  // Set up nominal trajectories
+  Eigen::NoChange_t same_col = Eigen::NoChange_t::NoChange;
+  trajectory_costs_nominal_.conservativeResize(num_rollouts, same_col);
 }
 
 ROBUST_MPPI_TEMPLATE
