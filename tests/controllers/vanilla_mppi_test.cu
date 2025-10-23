@@ -11,7 +11,7 @@ public:
   using COST_T = CartpoleQuadraticCost;
   using FB_T = DDPFeedback<DYN_T>;
   using SAMPLING_T = mppi::sampling_distributions::GaussianDistribution<DYN_T::DYN_PARAMS_T>;
-  using CONTROLLER_T = VanillaMPPIController<DYN_T, COST_T, FB_T, NUM_ROLLOUTS, SAMPLING_T>;
+  using CONTROLLER_T = VanillaMPPIController<DYN_T, COST_T, FB_T, SAMPLING_T>;
   using control_trajectory = CONTROLLER_T::control_trajectory;
   using control_array = CONTROLLER_T::control_array;
 
@@ -43,7 +43,7 @@ public:
     EXPECT_EQ(model.getGrdSharedSizeBytes(), 0);
     EXPECT_EQ(model.getBlkSharedSizeBytes(), 0);
     sampler = new SAMPLING_T(sampler_params);
-    controller = new CONTROLLER_T(&model, &cost, fb_controller, sampler, dt, max_iter, lambda, alpha, NUM_TIMESTEPS,
+    controller = new CONTROLLER_T(&model, &cost, fb_controller, sampler, dt, max_iter, lambda, alpha, NUM_TIMESTEPS, NUM_ROLLOUTS,
                                   init_control, stream);
   }
 
@@ -168,7 +168,7 @@ public:
   using COST_T = QuadrotorQuadraticCost;
   using FB_T = DDPFeedback<DYN_T>;
   using SAMPLING_T = mppi::sampling_distributions::GaussianDistribution<DYN_T::DYN_PARAMS_T>;
-  using CONTROLLER_T = VanillaMPPIController<DYN_T, COST_T, FB_T, NUM_ROLLOUTS, SAMPLING_T>;
+  using CONTROLLER_T = VanillaMPPIController<DYN_T, COST_T, FB_T, SAMPLING_T>;
   using control_trajectory = CONTROLLER_T::control_trajectory;
   using control_array = CONTROLLER_T::control_array;
 
@@ -198,7 +198,7 @@ public:
       init_control(3, i) = mppi::math::GRAVITY;
     }
     sampler = new SAMPLING_T(sampler_params);
-    controller = new CONTROLLER_T(&model, &cost, &fb_controller, sampler, dt, max_iter, lambda, alpha, NUM_TIMESTEPS,
+    controller = new CONTROLLER_T(&model, &cost, &fb_controller, sampler, dt, max_iter, lambda, alpha, NUM_TIMESTEPS, NUM_ROLLOUTS,
                                   init_control, stream);
   }
 

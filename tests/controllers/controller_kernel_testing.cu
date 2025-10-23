@@ -52,27 +52,36 @@ public:
 using DI_FEEDBACK_T = DDPFeedback<DoubleIntegratorDynamics>;
 
 template <int NUM_ROLLOUTS>
-using DI_Vanilla = VanillaMPPIController<DoubleIntegratorDynamics, DoubleIntegratorDummyCost, DI_FEEDBACK_T,
-                                         NUM_ROLLOUTS>;
+struct DI_Vanilla {
+  typedef VanillaMPPIController<DoubleIntegratorDynamics, DoubleIntegratorDummyCost, DI_FEEDBACK_T> CONTROLLER_T;
+  static const int num_rollouts = NUM_ROLLOUTS;
+};
 
 template <int NUM_ROLLOUTS>
-using DI_Colored = ColoredMPPIController<DoubleIntegratorDynamics, DoubleIntegratorDummyCost, DI_FEEDBACK_T,
-                                         NUM_ROLLOUTS>;
+struct DI_Colored {
+  typedef ColoredMPPIController<DoubleIntegratorDynamics, DoubleIntegratorDummyCost, DI_FEEDBACK_T> CONTROLLER_T;
+  static const int num_rollouts = NUM_ROLLOUTS;
+};
 
 template <int NUM_ROLLOUTS>
-using DI_Tube =
-    TubeMPPIController<DoubleIntegratorDynamics, DoubleIntegratorDummyCost, DI_FEEDBACK_T, NUM_ROLLOUTS>;
+struct DI_Tube {
+  typedef TubeMPPIController<DoubleIntegratorDynamics, DoubleIntegratorDummyCost, DI_FEEDBACK_T> CONTROLLER_T;
+  static const int num_rollouts = NUM_ROLLOUTS;
+};
 
 template <int NUM_ROLLOUTS>
-using DI_Robust = RobustMPPIController<DoubleIntegratorDynamics, DoubleIntegratorDummyCost, DI_FEEDBACK_T,
-                                       NUM_ROLLOUTS>;
+struct DI_Robust {
+  typedef RobustMPPIController<DoubleIntegratorDynamics, DoubleIntegratorDummyCost, DI_FEEDBACK_T> CONTROLLER_T;
+  static const int num_rollouts = NUM_ROLLOUTS;
+};
 
 // TODO: Add more dynamics/cost function specializations
 
-template <class CONTROLLER_T>
+template <class CONTROLLER_STRUCT>
 class ControllerKernelChoiceTest : public ::testing::Test
 {
 public:
+  using CONTROLLER_T = typename CONTROLLER_STRUCT::CONTROLLER_T;
   using DYN_T = typename CONTROLLER_T::TEMPLATED_DYNAMICS;
   using COST_T = typename CONTROLLER_T::TEMPLATED_COSTS;
   using FB_T = typename CONTROLLER_T::TEMPLATED_FEEDBACK;
@@ -113,18 +122,20 @@ public:
   {
     params.dt_ = dt;
     params.num_timesteps_ = num_timesteps;
+    params.num_rollouts_ = CONTROLLER_STRUCT::num_rollouts;
     params.dynamics_rollout_dim_ = rollout_dyn;
     params.cost_rollout_dim_ = rollout_cost;
   }
 
   void TearDown() override
   {
+    HANDLE_ERROR(cudaStreamSynchronize(stream));
     controller.reset();
+    HANDLE_ERROR(cudaStreamDestroy(stream));
     delete fb_controller;
     delete sampler;
     delete model;
     delete cost;
-    HANDLE_ERROR(cudaStreamSynchronize(stream));
   }
 
   cudaStream_t stream;

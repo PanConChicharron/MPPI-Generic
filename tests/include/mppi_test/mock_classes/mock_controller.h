@@ -12,7 +12,7 @@
 
 // ===== mock controller ====
 class MockController
-  : public Controller<MockDynamics, MockCost, MockFeedback, MockSamplingDistribution, 512>
+  : public Controller<MockDynamics, MockCost, MockFeedback, MockSamplingDistribution>
 {
 public:
   MOCK_METHOD0(calculateSampledStateTrajectories, void());

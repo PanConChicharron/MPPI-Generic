@@ -146,6 +146,7 @@ protected:
     mockController->model_ = &mockDynamics;
     mockController->fb_controller_ = &mockFeedback;
     mockController->sampler_ = &mockSamplingDistribution;
+    mockController->setNumRollouts(512);
 
     EXPECT_CALL(*mockController->cost_, getParams()).Times(1);
     EXPECT_CALL(*mockController->model_, getParams()).Times(1);

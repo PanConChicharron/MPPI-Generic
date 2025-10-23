@@ -17,18 +17,18 @@ using FEEDBACK_T = DDPFeedback<MockDynamics>;
 const dim3 rolloutDim(1, 2, 1);
 using SAMPLER_T = mppi::sampling_distributions::GaussianDistribution<MockDynamics::DYN_PARAMS_T>;
 
-class TestController : public Controller<MockDynamics, MockCost, FEEDBACK_T, SAMPLER_T, number_rollouts>
+class TestController : public Controller<MockDynamics, MockCost, FEEDBACK_T, SAMPLER_T>
 {
 public:
-  typedef Controller<MockDynamics, MockCost, FEEDBACK_T, SAMPLER_T, number_rollouts> PARENT_CLASS;
+  typedef Controller<MockDynamics, MockCost, FEEDBACK_T, SAMPLER_T> PARENT_CLASS;
   using PARAMS_T = PARENT_CLASS::TEMPLATED_PARAMS;
 
   TestController(MockDynamics* model, MockCost* cost, FEEDBACK_T* fb_controller, SAMPLER_T* sampler, float dt,
-                 int max_iter, float lambda, float alpha, int num_timesteps,
+                 int max_iter, float lambda, float alpha, int num_timesteps, int num_rollouts,
                  const Eigen::Ref<const control_trajectory>& init_control_traj =
                      control_trajectory::Zero(MockDynamics::CONTROL_DIM, 1),
                  cudaStream_t stream = nullptr)
-    : PARENT_CLASS(model, cost, fb_controller, sampler, dt, max_iter, lambda, alpha, num_timesteps, init_control_traj,
+    : PARENT_CLASS(model, cost, fb_controller, sampler, dt, max_iter, lambda, alpha, num_timesteps, num_rollouts, init_control_traj,
                    stream)
   {
     // Allocate CUDA memory for the controller
@@ -53,7 +53,7 @@ public:
                       const std::array<control_trajectory, number_rollouts> noise)
   {
     int trajectory_size = control_trajectory().size();
-    for (int i = 0; i < number_rollouts; i++)
+    for (int i = 0; i < this->getNumRollouts(); i++)
     {
       HANDLE_ERROR(cudaMemcpyAsync(this->sampler_->getControlSample(i, 0, 0), noise[i].data(),
                                    sizeof(float) * trajectory_size, cudaMemcpyHostToDevice, stream_));
@@ -99,7 +99,7 @@ protected:
     // EXPECT_CALL(mockFeedback, GPUSetup()).Times(1);
 
     controller =
-        new TestController(mockDynamics, mockCost, mockFeedback, sampler, dt, max_iter, lambda, alpha, NUM_TIMESTEPS);
+        new TestController(mockDynamics, mockCost, mockFeedback, sampler, dt, max_iter, lambda, alpha, NUM_TIMESTEPS, number_rollouts);
     auto controller_params = controller->getParams();
     controller_params.dynamics_rollout_dim_ = rolloutDim;
     controller_params.cost_rollout_dim_ = rolloutDim;
@@ -146,7 +146,7 @@ TEST_F(ControllerTests, ConstructorDestructor)
   EXPECT_CALL(*mockDynamics, GPUSetup()).Times(1);
   // EXPECT_CALL(mockFeedback, GPUSetup()).Times(1);
   TestController* controller_test = new TestController(mockDynamics, mockCost, mockFeedback, sampler, dt, max_iter,
-                                                       lambda, alpha, num_timesteps, init_control_trajectory, stream);
+                                                       lambda, alpha, num_timesteps, number_rollouts, init_control_trajectory, stream);
 
   EXPECT_EQ(controller_test->model_, mockDynamics);
   EXPECT_EQ(controller_test->cost_, mockCost);
@@ -155,6 +155,7 @@ TEST_F(ControllerTests, ConstructorDestructor)
   EXPECT_EQ(controller_test->getLambda(), lambda);
   EXPECT_EQ(controller_test->getAlpha(), alpha);
   EXPECT_EQ(controller_test->getNumTimesteps(), num_timesteps);
+  EXPECT_EQ(controller_test->getNumRollouts(), number_rollouts);
   EXPECT_EQ(controller_test->getControlSeq(), init_control_trajectory);
   EXPECT_EQ(controller_test->getStream(), stream);
   EXPECT_EQ(controller_test->getFeedbackEnabled(), false);
@@ -173,6 +174,7 @@ TEST_F(ControllerTests, ParamBasedConstructor)
   int num_timesteps = 10;
   TestController::TEMPLATED_PARAMS controller_params;
   controller_params.num_timesteps_ = num_timesteps;
+  controller_params.num_rollouts_ = number_rollouts;
   controller_params.dt_ = dt;
   controller_params.num_iters_ = max_iter;
   controller_params.lambda_ = lambda;
@@ -199,6 +201,7 @@ TEST_F(ControllerTests, ParamBasedConstructor)
   EXPECT_EQ(controller_test->getLambda(), lambda);
   EXPECT_EQ(controller_test->getAlpha(), alpha);
   EXPECT_EQ(controller_test->getNumTimesteps(), num_timesteps);
+  EXPECT_EQ(controller_test->getNumRollouts(), number_rollouts);
   EXPECT_EQ(controller_test->getControlSeq(), controller_params.init_control_traj_);
   EXPECT_EQ(controller_test->getStream(), stream);
   EXPECT_EQ(controller_test->getFeedbackEnabled(), false);
@@ -253,6 +256,25 @@ TEST_F(ControllerTests, setNumTimesteps)
   EXPECT_EQ(actual_output_traj.cols(), 1000);
   EXPECT_EQ(controller_params.init_control_traj_.cols(), 1000);
   EXPECT_EQ(sampler_params.num_timesteps, 1000);
+}
+
+TEST_F(ControllerTests, setNumRollouts)
+{
+  controller->setNumRollouts(10);
+  auto sampler_params = controller->getSamplingParams();
+  auto cost_trajectory = controller->getSampledCostSeq();
+
+  EXPECT_EQ(controller->getNumRollouts(), 10);
+  EXPECT_EQ(cost_trajectory.rows(), 10);
+  EXPECT_EQ(sampler_params.num_rollouts, 10);
+
+  controller->setNumRollouts(1000);
+  sampler_params = controller->getSamplingParams();
+  cost_trajectory = controller->getSampledCostSeq();
+
+  EXPECT_EQ(controller->getNumRollouts(), 1000);
+  EXPECT_EQ(cost_trajectory.rows(), 1000);
+  EXPECT_EQ(sampler_params.num_rollouts, 1000);
 }
 
 TEST_F(ControllerTests, smoothControlTrajectory)

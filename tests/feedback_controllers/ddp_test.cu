@@ -158,6 +158,7 @@ TEST(DDPSolver_Test, Cartpole_Tracking)
   float lambda = 0.25;
   float alpha = 0.001;
   const int num_timesteps = 100;
+  const int num_rollouts = 2048;
   auto fb_controller = DDPFeedback<CartpoleDynamics>(&model, dt, num_timesteps);
 
   auto sampler = SAMPLER_T();
@@ -180,8 +181,8 @@ TEST(DDPSolver_Test, Cartpole_Tracking)
   fb_controller.initTrackingController();
 
   auto controller = VanillaMPPIController<CartpoleDynamics, CartpoleQuadraticCost,
-                                          DDPFeedback<CartpoleDynamics>, 2048, SAMPLER_T>(
-      &model, &cost, &fb_controller, &sampler, dt, max_iter, lambda, alpha, num_timesteps);
+                                          DDPFeedback<CartpoleDynamics>, SAMPLER_T>(
+      &model, &cost, &fb_controller, &sampler, dt, max_iter, lambda, alpha, num_timesteps, num_rollouts);
 
   auto controller_params = controller.getParams();
   controller_params.dynamics_rollout_dim_ = dim3(64, 8, 1);
@@ -249,7 +250,7 @@ TEST(DDPSolver_Test, Quadrotor_Tracking)
 
   using DYN = QuadrotorDynamics;
   using COST = QuadrotorQuadraticCost;
-  using CONTROLLER = VanillaMPPIController<DYN, COST, DDPFeedback<DYN>, 2048>;
+  using CONTROLLER = VanillaMPPIController<DYN, COST, DDPFeedback<DYN>>;
 
   std::array<float2, DYN::CONTROL_DIM> control_ranges;
   for (int i = 0; i < 3; i++)

@@ -17,7 +17,7 @@ using COST = DoubleIntegratorCircleCost;
 using SAMPLING = mppi::sampling_distributions::GaussianDistribution<DYN::DYN_PARAMS_T>;
 using SAMPLER_PARAMS = SAMPLING::SAMPLING_PARAMS_T;
 using FB_CONTROLLER = DDPFeedback<DYN>;
-using CONTROLLER_T = RobustMPPIController<DYN, COST, FB_CONTROLLER, 2048, SAMPLING>;
+using CONTROLLER_T = RobustMPPIController<DYN, COST, FB_CONTROLLER, SAMPLING>;
 
 class TestRobust : public CONTROLLER_T
 {
@@ -133,6 +133,7 @@ protected:
     controller_params.num_iters_ = 3;
     controller_params.value_function_threshold_ = 1000.0;
     controller_params.num_timesteps_ = 100;
+    controller_params.num_rollouts_ = 2048;
     controller_params.init_control_traj_ = CONTROLLER_T::control_trajectory::Zero(DYN::CONTROL_DIM, controller_params.num_timesteps_);
 
     controller_params.dynamics_rollout_dim_ = dim3(64, 4, 2);
@@ -319,7 +320,7 @@ protected:
     fb_controller->setParams(fb_params);
 
     test_controller =
-        new TestRobust(model, cost, fb_controller, sampler, dt, 3, lambda, alpha, 1000.0, 100, init_control_traj);
+        new TestRobust(model, cost, fb_controller, sampler, dt, 3, lambda, alpha, 1000.0, 100, 2048, init_control_traj);
     auto controller_params = test_controller->getParams();
     controller_params.dynamics_rollout_dim_ = dim3(64, 4, 2);
     controller_params.cost_rollout_dim_ = dim3(64, 1, 2);
@@ -564,6 +565,7 @@ TEST(RMPPITest, RobustMPPILargeVariance)
   using DYNAMICS = DoubleIntegratorDynamics;
   using COST_T = DoubleIntegratorCircleCost;
   const int num_timesteps = 50;  // Optimization time horizon
+  const int num_rollouts = 1024;
   using FEEDBACK_T = DDPFeedback<DYNAMICS>;
   // Noise enters the system during the "true" state propagation. In this case the noise is nominal
   DYNAMICS model(100);  // Initialize the double integrator dynamics
@@ -618,8 +620,9 @@ TEST(RMPPITest, RobustMPPILargeVariance)
   //         1024, 64, 8, 1>(&model, &cost2, dt, max_iter, gamma, value_function_threshold, Q, Qf, R, control_var);
 
   // Initialize the R MPPI controller
-  auto controller = RobustMPPIController<DYNAMICS, COST_T, FEEDBACK_T, 1024, SAMPLING>(
-      &model, &cost, &fb_controller, &sampler, dt, max_iter, lambda, alpha, value_function_threshold, num_timesteps);
+  auto controller = RobustMPPIController<DYNAMICS, COST_T, FEEDBACK_T, SAMPLING>(
+      &model, &cost, &fb_controller, &sampler, dt, max_iter, lambda, alpha, value_function_threshold, num_timesteps,
+      num_rollouts);
 
   auto controller_params = controller.getParams();
   controller_params.dynamics_rollout_dim_ = dim3(64, 4, 2);
@@ -779,11 +782,12 @@ TEST(RMPPITest, RobustMPPILargeVarianceRobustCost)
   //         1024, 64, 8, 1>(&model, &cost2, dt, max_iter, gamma, value_function_threshold, Q, Qf, R, control_var);
 
   using CONTROLLER_PARAMS =
-      typename RobustMPPIController<DYNAMICS, COST_T, FEEDBACK_T, 1024, SAMPLING>::TEMPLATED_PARAMS;
+      typename RobustMPPIController<DYNAMICS, COST_T, FEEDBACK_T, SAMPLING>::TEMPLATED_PARAMS;
   CONTROLLER_PARAMS controller_params;
   controller_params.dt_ = dt;
   controller_params.num_iters_ = max_iter;
   controller_params.num_timesteps_ = num_timesteps;
+  controller_params.num_rollouts_ = 1024;
   controller_params.lambda_ = lambda;
   controller_params.alpha_ = alpha;
   controller_params.value_function_threshold_ = value_function_threshold;
@@ -792,7 +796,7 @@ TEST(RMPPITest, RobustMPPILargeVarianceRobustCost)
   controller_params.eval_dyn_kernel_dim_ = dim3(64, 4, 1);
   controller_params.eval_cost_kernel_dim_ = dim3(num_timesteps, 1, 1);
   // Initialize the R MPPI controller
-  auto controller = RobustMPPIController<DYNAMICS, COST_T, FEEDBACK_T, 1024, SAMPLING>(
+  auto controller = RobustMPPIController<DYNAMICS, COST_T, FEEDBACK_T, SAMPLING>(
       &model, &cost, &fb_controller, &sampler, controller_params);
   controller.setKernelChoice(kernelType::USE_SPLIT_KERNELS);
   int fail_count = 0;
