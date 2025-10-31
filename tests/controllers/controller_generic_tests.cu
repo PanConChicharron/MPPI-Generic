@@ -28,8 +28,8 @@ public:
                  const Eigen::Ref<const control_trajectory>& init_control_traj =
                      control_trajectory::Zero(MockDynamics::CONTROL_DIM, 1),
                  cudaStream_t stream = nullptr)
-    : PARENT_CLASS(model, cost, fb_controller, sampler, dt, max_iter, lambda, alpha, num_timesteps, num_rollouts, init_control_traj,
-                   stream)
+    : PARENT_CLASS(model, cost, fb_controller, sampler, dt, max_iter, lambda, alpha, num_timesteps, num_rollouts,
+                   init_control_traj, stream)
   {
     // Allocate CUDA memory for the controller
     allocateCUDAMemoryHelper(1);
@@ -98,8 +98,8 @@ protected:
     EXPECT_CALL(*mockDynamics, GPUSetup()).Times(1);
     // EXPECT_CALL(mockFeedback, GPUSetup()).Times(1);
 
-    controller =
-        new TestController(mockDynamics, mockCost, mockFeedback, sampler, dt, max_iter, lambda, alpha, NUM_TIMESTEPS, number_rollouts);
+    controller = new TestController(mockDynamics, mockCost, mockFeedback, sampler, dt, max_iter, lambda, alpha,
+                                    NUM_TIMESTEPS, number_rollouts);
     auto controller_params = controller->getParams();
     controller_params.dynamics_rollout_dim_ = rolloutDim;
     controller_params.cost_rollout_dim_ = rolloutDim;
@@ -114,6 +114,7 @@ protected:
     delete mockCost;
     delete mockFeedback;
     delete sampler;
+    HANDLE_ERROR(cudaStreamDestroy(stream));
   }
 
   MockDynamics* mockDynamics;
@@ -145,8 +146,9 @@ TEST_F(ControllerTests, ConstructorDestructor)
   EXPECT_CALL(*mockCost, GPUSetup()).Times(1);
   EXPECT_CALL(*mockDynamics, GPUSetup()).Times(1);
   // EXPECT_CALL(mockFeedback, GPUSetup()).Times(1);
-  TestController* controller_test = new TestController(mockDynamics, mockCost, mockFeedback, sampler, dt, max_iter,
-                                                       lambda, alpha, num_timesteps, number_rollouts, init_control_trajectory, stream);
+  TestController* controller_test =
+      new TestController(mockDynamics, mockCost, mockFeedback, sampler, dt, max_iter, lambda, alpha, num_timesteps,
+                         number_rollouts, init_control_trajectory, stream);
 
   EXPECT_EQ(controller_test->model_, mockDynamics);
   EXPECT_EQ(controller_test->cost_, mockCost);
@@ -156,7 +158,6 @@ TEST_F(ControllerTests, ConstructorDestructor)
   EXPECT_EQ(controller_test->getAlpha(), alpha);
   EXPECT_EQ(controller_test->getNumTimesteps(), num_timesteps);
   EXPECT_EQ(controller_test->getNumRollouts(), number_rollouts);
-  EXPECT_EQ(controller_test->getControlSeq(), init_control_trajectory);
   EXPECT_EQ(controller_test->getStream(), stream);
   EXPECT_EQ(controller_test->getFeedbackEnabled(), false);
 
@@ -164,6 +165,66 @@ TEST_F(ControllerTests, ConstructorDestructor)
   // EXPECT_NE(controller_test->getRandomSeed(), 0);
 
   // TODO check for correct defaults
+  EXPECT_CALL(*mockDynamics, freeCudaMem()).Times(1);
+  EXPECT_CALL(*mockCost, freeCudaMem()).Times(1);
+  delete controller_test;
+}
+
+TEST_F(ControllerTests, ArgumentConstructorControlTrajectories)
+{
+  int num_timesteps = 10;
+
+  TestController::control_trajectory init_control_trajectory =
+      TestController::control_trajectory::Random(MockDynamics::CONTROL_DIM, 1);
+
+  // expect double check rebind
+  EXPECT_CALL(*mockCost, bindToStream(stream)).Times(1);
+  EXPECT_CALL(*mockDynamics, bindToStream(stream)).Times(1);
+  // // EXPECT_CALL(mockFeedback, bindToStream(stream)).Times(1);
+
+  // // expect GPU setup called again
+  EXPECT_CALL(*mockCost, GPUSetup()).Times(1);
+  EXPECT_CALL(*mockDynamics, GPUSetup()).Times(1);
+  TestController* controller_test =
+      new TestController(mockDynamics, mockCost, mockFeedback, sampler, dt, max_iter, lambda, alpha, num_timesteps,
+                         number_rollouts, init_control_trajectory, stream);
+
+  auto new_controller_params = controller_test->getParams();
+  TestController::control_array model_zero_control = mockDynamics->getZeroControl();
+  TestController::control_array expected_end_control =
+      (init_control_trajectory.col(0).array() - model_zero_control.array()) *
+          new_controller_params.slide_control_scale_.array() +
+      model_zero_control.array();
+
+  // Check control trajectories
+  for (int t = 0; t < num_timesteps; t++)
+  {
+    if (t < init_control_trajectory.cols())
+    {
+      EXPECT_FLOAT_EQ(fabsf((new_controller_params.init_control_traj_.col(t) - init_control_trajectory.col(t)).sum()),
+                      0.0f)
+          << "Params init control at time " << t << " did not match initial controls passed into constructor";
+    }
+    else
+    {
+      EXPECT_NEAR(fabsf((new_controller_params.init_control_traj_.col(t) - expected_end_control).sum()), 0.0f, 1e-10f)
+          << "Params init control at time " << t << " did not match initial controls passed into constructor";
+    }
+  }
+  TestController::control_trajectory new_control_trajectory = controller_test->getControlSeq();
+  for (int t = 0; t < num_timesteps; t++)
+  {
+    if (t < init_control_trajectory.cols())
+    {
+      EXPECT_NEAR(fabsf((new_control_trajectory.col(t) - init_control_trajectory.col(t)).sum()), 0.0f, 1e-10f)
+          << "Control vector at time " << t << " did not match initial controls passed into constructor";
+    }
+    else
+    {
+      EXPECT_NEAR(fabsf((new_control_trajectory.col(t) - expected_end_control).sum()), 0.0f, 1e-10f)
+          << "Control vector at time " << t << " did not match initial controls passed into constructor";
+    }
+  }
   EXPECT_CALL(*mockDynamics, freeCudaMem()).Times(1);
   EXPECT_CALL(*mockCost, freeCudaMem()).Times(1);
   delete controller_test;
@@ -202,7 +263,7 @@ TEST_F(ControllerTests, ParamBasedConstructor)
   EXPECT_EQ(controller_test->getAlpha(), alpha);
   EXPECT_EQ(controller_test->getNumTimesteps(), num_timesteps);
   EXPECT_EQ(controller_test->getNumRollouts(), number_rollouts);
-  EXPECT_EQ(controller_test->getControlSeq(), controller_params.init_control_traj_);
+  // EXPECT_EQ(controller_test->getControlSeq(), controller_params.init_control_traj_);
   EXPECT_EQ(controller_test->getStream(), stream);
   EXPECT_EQ(controller_test->getFeedbackEnabled(), false);
 
@@ -210,6 +271,50 @@ TEST_F(ControllerTests, ParamBasedConstructor)
   // EXPECT_NE(controller_test->getRandomSeed(), 0);
 
   // TODO check for correct defaults
+  EXPECT_CALL(*mockDynamics, freeCudaMem()).Times(1);
+  EXPECT_CALL(*mockCost, freeCudaMem()).Times(1);
+  delete controller_test;
+}
+
+TEST_F(ControllerTests, ParamConstructorControlTrajectories)
+{
+  int num_timesteps = 10;
+  TestController::TEMPLATED_PARAMS controller_params;
+  controller_params.num_timesteps_ = num_timesteps;
+  controller_params.num_rollouts_ = number_rollouts;
+  controller_params.dt_ = dt;
+  controller_params.num_iters_ = max_iter;
+  controller_params.lambda_ = lambda;
+  controller_params.alpha_ = alpha;
+  controller_params.init_control_traj_ = TestController::control_trajectory::Random(MockDynamics::CONTROL_DIM, 1);
+  // fill in empty portions of control trajectories with last control value
+  controller_params.slide_control_scale_ = TestController::control_array::Ones();
+
+  // expect double check rebind
+  EXPECT_CALL(*mockCost, bindToStream(stream)).Times(1);
+  EXPECT_CALL(*mockDynamics, bindToStream(stream)).Times(1);
+
+  // // expect GPU setup called again
+  EXPECT_CALL(*mockCost, GPUSetup()).Times(1);
+  EXPECT_CALL(*mockDynamics, GPUSetup()).Times(1);
+  TestController* controller_test =
+      new TestController(mockDynamics, mockCost, mockFeedback, sampler, controller_params, stream);
+
+  auto new_controller_params = controller_test->getParams();
+  // Check control trajectories
+  for (int t = 0; t < num_timesteps; t++)
+  {
+    EXPECT_FLOAT_EQ(
+        fabsf((new_controller_params.init_control_traj_.col(t) - controller_params.init_control_traj_.col(0)).sum()),
+        0.0f)
+        << "Params init control at time " << t << " did not match initial controls passed into constructor";
+  }
+  auto new_control_trajectory = controller_test->getControlSeq();
+  for (int t = 0; t < num_timesteps; t++)
+  {
+    EXPECT_FLOAT_EQ(fabsf((new_control_trajectory.col(t) - controller_params.init_control_traj_.col(0)).sum()), 0.0f)
+        << "Control vector at time " << t << " did not match initial controls passed into constructor";
+  }
   EXPECT_CALL(*mockDynamics, freeCudaMem()).Times(1);
   EXPECT_CALL(*mockCost, freeCudaMem()).Times(1);
   delete controller_test;

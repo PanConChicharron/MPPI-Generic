@@ -43,8 +43,8 @@ public:
     EXPECT_EQ(model.getGrdSharedSizeBytes(), 0);
     EXPECT_EQ(model.getBlkSharedSizeBytes(), 0);
     sampler = new SAMPLING_T(sampler_params);
-    controller = new CONTROLLER_T(&model, &cost, fb_controller, sampler, dt, max_iter, lambda, alpha, NUM_TIMESTEPS, NUM_ROLLOUTS,
-                                  init_control, stream);
+    controller = new CONTROLLER_T(&model, &cost, fb_controller, sampler, dt, max_iter, lambda, alpha, NUM_TIMESTEPS,
+                                  NUM_ROLLOUTS, init_control, stream);
   }
 
   void TearDown() override
@@ -198,8 +198,8 @@ public:
       init_control(3, i) = mppi::math::GRAVITY;
     }
     sampler = new SAMPLING_T(sampler_params);
-    controller = new CONTROLLER_T(&model, &cost, &fb_controller, sampler, dt, max_iter, lambda, alpha, NUM_TIMESTEPS, NUM_ROLLOUTS,
-                                  init_control, stream);
+    controller = new CONTROLLER_T(&model, &cost, &fb_controller, sampler, dt, max_iter, lambda, alpha, NUM_TIMESTEPS,
+                                  NUM_ROLLOUTS, init_control, stream);
   }
 
   void TearDown() override
@@ -293,7 +293,7 @@ TEST_F(Quadrotor_VanillaMPPI, HoverTest)
     controller->computeControl(current_state, 1);
     loop_end = std::chrono::steady_clock::now();
 
-    control = controller->getControlSeq().col(0); //block(0, 0, DYN_T::CONTROL_DIM, 1);
+    control = controller->getControlSeq().col(0);  // block(0, 0, DYN_T::CONTROL_DIM, 1);
     // Increment the state
     model.computeStateDeriv(current_state, control, xdot);
     model.updateState(current_state, xdot, dt);

@@ -46,6 +46,7 @@ enum class kernelType : int
 template <int S_DIM, int C_DIM>
 struct ControllerParams
 {
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
   static const int TEMPLATED_STATE_DIM = S_DIM;
   static const int TEMPLATED_CONTROL_DIM = C_DIM;
   float dt_;
@@ -63,8 +64,8 @@ struct ControllerParams
   dim3 visualize_dim_ = dim3(32, 1, 1);
   int norm_exp_kernel_parallelization_ = 64;
 
-  Eigen::Matrix<float, C_DIM, Eigen::Dynamic> init_control_traj_ = Eigen::Matrix<float, C_DIM, 1>::Zero();
   Eigen::Matrix<float, C_DIM, 1> slide_control_scale_ = Eigen::Matrix<float, C_DIM, 1>::Zero();
+  Eigen::Matrix<float, C_DIM, Eigen::Dynamic> init_control_traj_ = Eigen::Matrix<float, C_DIM, 1>::Zero();
 };
 
 template <class DYN_T, class COST_T, class FB_T, class SAMPLING_T,
@@ -130,22 +131,13 @@ public:
     params.alpha_ = alpha;
     params.num_timesteps_ = num_timesteps;
     params.num_rollouts_ = num_rollouts;
-    // setNumTimesteps(params.num_timesteps_);
 
     // Set initial control in temp params
-    resizeTimeTrajectory<DYN_T::CONTROL_DIM>(params.init_control_traj_, num_timesteps);
-    params.init_control_traj_.block(0, 0, DYN_T::CONTROL_DIM, init_control_traj.cols()) = init_control_traj;
-    if (init_control_traj.cols() < getNumTimesteps())
-    {  // Copy last control value to fill time horizon
-      for (int i = init_control_traj.cols(); i < getNumTimesteps(); i++)
-      {
-        params.init_control_traj_.col(i) = init_control_traj.col(init_control_traj.cols() - 1);
-      }
-    }
+    params.init_control_traj_ = init_control_traj;
     setParams(params);
     setTrajectoriesToZero();
 
-    control_ = params.init_control_traj_;
+    control_ = params_.init_control_traj_;
     control_history_ = Eigen::Matrix<float, DYN_T::CONTROL_DIM, 2>::Zero();
 
     // Bind the model and control to the given stream
@@ -175,7 +167,6 @@ public:
     setLogger(logger);
 
     sampler_->setNumDistributions(1);
-    // setNumTimesteps(params_.num_timesteps_);
     setParams(params);
     setTrajectoriesToZero();
     control_ = params_.init_control_traj_;
@@ -599,14 +590,15 @@ public:
 
   virtual void slideControlSequenceHelper(int steps, Eigen::Ref<control_trajectory> u)
   {
+    control_array zero_control = model_->getZeroControl();
     for (int i = 0; i < getNumTimesteps(); ++i)
     {
       int ind = std::min(i + steps, getNumTimesteps() - 1);
       u.col(i) = u.col(ind);
       if (i + steps > getNumTimesteps() - 1)
       {
-        u.col(i) = (u.col(ind).array() - model_->zero_control_.array()) * params_.slide_control_scale_.array() +
-                   model_->zero_control_.array();
+        u.col(i) =
+            (u.col(ind).array() - zero_control.array()) * params_.slide_control_scale_.array() + zero_control.array();
       }
     }
   }
@@ -708,8 +700,8 @@ public:
                            num_timesteps);
       return;
     }
-    bool larger_array_needed = num_timesteps > params_.num_timesteps_;
-    int prev_size = params_.num_timesteps_;
+    bool require_fill_in = num_timesteps > params_.init_control_traj_.cols();
+    int prev_size = params_.init_control_traj_.cols();
     params_.num_timesteps_ = num_timesteps;
     resizeTimeTrajectory<DYN_T::CONTROL_DIM>(control_, num_timesteps);
     resizeTimeTrajectory<DYN_T::STATE_DIM>(state_, num_timesteps);
@@ -722,12 +714,18 @@ public:
       resizeTimeTrajectory<1>(sampled_costs_[i], num_timesteps + 1);
       resizeTimeTrajectory<1, int>(sampled_crash_status_[i], num_timesteps);
     }
-    if (larger_array_needed)
+    if (require_fill_in)
     {
+      control_array zero_control = model_->getZeroControl();
       for (int i = prev_size; i < num_timesteps; i++)
-      {
-        params_.init_control_traj_.col(i) = params_.init_control_traj_.col(prev_size - 1);
+      {  // Fill time horizon with linear interpolation between last control and zero control
+        params_.init_control_traj_.col(i) =
+            (params_.init_control_traj_.col(prev_size - 1).array() - zero_control.array()) *
+                params_.slide_control_scale_.array() +
+            zero_control.array();
       }
+      // Reinitialize control_ to init_control_trajectory
+      control_ = params_.init_control_traj_;
     }
     sampler_->setNumTimesteps(params_.num_timesteps_);
     fb_controller_->setNumTimesteps(params_.num_timesteps_);

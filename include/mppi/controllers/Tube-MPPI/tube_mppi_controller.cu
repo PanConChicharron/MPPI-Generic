@@ -174,6 +174,7 @@ void TubeMPPI::setNumTimestepsHelper(const int num_timesteps, const bool update_
   PARENT_CLASS::setNumTimestepsHelper(num_timesteps, update_gpu_mem);
   // Set up nominal trajectories
   PARENT_CLASS::resizeTimeTrajectory(nominal_control_trajectory_, num_timesteps);
+  nominal_control_trajectory_ = this->params_.init_control_traj_;
   PARENT_CLASS::resizeTimeTrajectory(nominal_state_trajectory_, num_timesteps);
 }
 

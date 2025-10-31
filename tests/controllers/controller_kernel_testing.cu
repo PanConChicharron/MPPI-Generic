@@ -52,25 +52,29 @@ public:
 using DI_FEEDBACK_T = DDPFeedback<DoubleIntegratorDynamics>;
 
 template <int NUM_ROLLOUTS>
-struct DI_Vanilla {
+struct DI_Vanilla
+{
   typedef VanillaMPPIController<DoubleIntegratorDynamics, DoubleIntegratorDummyCost, DI_FEEDBACK_T> CONTROLLER_T;
   static const int num_rollouts = NUM_ROLLOUTS;
 };
 
 template <int NUM_ROLLOUTS>
-struct DI_Colored {
+struct DI_Colored
+{
   typedef ColoredMPPIController<DoubleIntegratorDynamics, DoubleIntegratorDummyCost, DI_FEEDBACK_T> CONTROLLER_T;
   static const int num_rollouts = NUM_ROLLOUTS;
 };
 
 template <int NUM_ROLLOUTS>
-struct DI_Tube {
+struct DI_Tube
+{
   typedef TubeMPPIController<DoubleIntegratorDynamics, DoubleIntegratorDummyCost, DI_FEEDBACK_T> CONTROLLER_T;
   static const int num_rollouts = NUM_ROLLOUTS;
 };
 
 template <int NUM_ROLLOUTS>
-struct DI_Robust {
+struct DI_Robust
+{
   typedef RobustMPPIController<DoubleIntegratorDynamics, DoubleIntegratorDummyCost, DI_FEEDBACK_T> CONTROLLER_T;
   static const int num_rollouts = NUM_ROLLOUTS;
 };
