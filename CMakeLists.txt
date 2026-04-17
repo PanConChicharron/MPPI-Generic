@@ -8,7 +8,11 @@ endif()
 if (CMAKE_VERSION VERSION_LESS 3.24 AND POLICY CMP0104)
     cmake_policy(SET CMP0104 OLD)
 endif()
-project(MPPI-Generic VERSION 0.9.0 LANGUAGES C CXX CUDA)
+# Get Version from file
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" MPPI_VERSION_FROM_FILE)
+# Clean up trailng whitespace and newlines
+string(STRIP "${MPPI_VERSION_FROM_FILE}" MPPI_VERSION)
+project(MPPI-Generic VERSION ${MPPI_VERSION} LANGUAGES C CXX CUDA)
 
 ####################################
 # Set up options for configuration #
@@ -54,13 +58,19 @@ find_package(Eigen3 REQUIRED)
 # https://listengine.tuxfamily.org/lists.tuxfamily.org/eigen/2016/06/msg00006.html
 # add_definitions(-DEIGEN_MAX_STATIC_ALIGN_BYTES=0)
 
+# Generate Version Header File from Project Version
+configure_file("${PROJECT_SOURCE_DIR}/include/mppi/version.h.in" "${PROJECT_BINARY_DIR}/include/mppi/version.h")
+
 # Create a Header-only MPPI Library
 add_library(${MPPI_HEADER_LIBRARY_NAME} INTERFACE)
 add_library(MPPI::MPPI ALIAS ${MPPI_HEADER_LIBRARY_NAME})
 target_include_directories(${MPPI_HEADER_LIBRARY_NAME} INTERFACE
+  ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}
   "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
+  "$<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>"
   "$<INSTALL_INTERFACE:include>"
 )
+
 target_link_libraries(${MPPI_HEADER_LIBRARY_NAME} INTERFACE
   ${MPPI_GENERIC_CUDA_EXTRA_LIBS}
   ${CUDA_LIBRARIES}
@@ -106,8 +116,15 @@ endif()
 
 # Install all library header files
 install(
-        DIRECTORY ${PROJECT_SOURCE_DIR}/include/mppi
-        DESTINATION include
+  DIRECTORY ${PROJECT_SOURCE_DIR}/include/mppi
+  DESTINATION include
+  PATTERN "*.in" EXCLUDE
+)
+
+# Install generated header file version.h
+install(
+  DIRECTORY ${PROJECT_BINARY_DIR}/include/mppi
+  DESTINATION include
 )
 
 ###########################################
