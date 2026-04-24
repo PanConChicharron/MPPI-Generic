@@ -64,6 +64,7 @@ void ShapingFunctionImpl<CLASS_T, PARAMS_T, NUM_ROLLOUTS, BDIM_X>::computeWeight
                                                                                   float* trajectory_costs_d,
                                                                                   cudaStream_t stream)
 {
+  eigen_assert(trajectory_costs.size() == NUM_ROLLOUTS);
   // Copy the costs back to the host
   HANDLE_ERROR(cudaMemcpyAsync(trajectory_costs.data(), trajectory_costs_d, NUM_ROLLOUTS * sizeof(float),
                                cudaMemcpyDeviceToHost, this->stream_));

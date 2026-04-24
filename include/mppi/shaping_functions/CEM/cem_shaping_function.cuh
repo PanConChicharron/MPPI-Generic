@@ -14,7 +14,7 @@ template <class CLASS_T, class PARAMS_T, int NUM_ROLLOUTS, int BDIM_X>
 class CEMShapingFunctionImpl : public ShapingFunctionImpl<CLASS_T, PARAMS_T, NUM_ROLLOUTS, BDIM_X>
 {
 public:
-  typedef Eigen::Matrix<float, NUM_ROLLOUTS, 1> cost_traj;
+  using cost_traj = Eigen::VectorXf;
 
   CEMShapingFunctionImpl()
   {

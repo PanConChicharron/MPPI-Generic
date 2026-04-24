@@ -117,7 +117,7 @@ private:
   // nominal state CPU side copies
   control_trajectory nominal_control_trajectory_ = control_trajectory::Zero();
   state_trajectory nominal_state_trajectory_ = state_trajectory::Zero();
-  sampled_cost_traj trajectory_costs_nominal_ = sampled_cost_traj::Zero();
+  sampled_cost_traj trajectory_costs_nominal_;
 
   // Check to see if nominal state has been initialized
   bool nominalStateInit_ = false;

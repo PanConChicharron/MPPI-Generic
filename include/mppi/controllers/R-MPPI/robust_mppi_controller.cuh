@@ -263,7 +263,7 @@ protected:
   // Storage classes
   control_trajectory nominal_control_trajectory_ = control_trajectory::Zero();
   state_trajectory nominal_state_trajectory_ = state_trajectory::Zero();
-  sampled_cost_traj trajectory_costs_nominal_ = sampled_cost_traj::Zero();
+  sampled_cost_traj trajectory_costs_nominal_;
 
   // Make the control history size flexible, related to issue #30
   Eigen::Matrix<float, DYN_T::CONTROL_DIM, 2> nominal_control_history_;  // History used for nominal_state IS

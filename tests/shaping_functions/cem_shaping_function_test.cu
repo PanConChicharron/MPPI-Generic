@@ -141,8 +141,8 @@ TEST_F(CEMShapingFunctionTest, computeWeightsTest)
   shaping_function.GPUSetup();
 
   // Use a range based for loop to set the cost
-  cost_traj = ShapingFunction<num_rollouts, 1>::cost_traj::Zero();
-  cost_traj_copy = ShapingFunction<num_rollouts, 1>::cost_traj::Zero();
+  cost_traj = CEMShapingFunction<num_rollouts, 1>::cost_traj::Zero(num_rollouts);
+  cost_traj_copy = CEMShapingFunction<num_rollouts, 1>::cost_traj::Zero(num_rollouts);
   const float gamma_total = 1.0;
   const float gamma_inc = 0.1;
   const float gamma_start = 0.0;

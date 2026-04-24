@@ -94,7 +94,7 @@ TEST_F(ShapingFunctionTest, launchWeightKernelTest)
   shaping_function.GPUSetup();
 
   // Use a range based for loop to set the cost
-  cost_traj = ShapingFunction<num_rollouts, 1>::cost_traj::Zero();
+  cost_traj = ShapingFunction<num_rollouts, 1>::cost_traj::Zero(num_rollouts);
   for (int i = 0; i < num_rollouts; i++)
   {
     cost_traj(i) = distribution(generator);
@@ -126,7 +126,8 @@ TEST_F(ShapingFunctionTest, computeWeightsTest)
   shaping_function.GPUSetup();
 
   // Use a range based for loop to set the cost
-  cost_traj = ShapingFunction<num_rollouts, 1>::cost_traj::Zero();
+  cost_traj = ShapingFunction<num_rollouts, 1>::cost_traj::Zero(num_rollouts);
+  result_cost_traj = ShapingFunction<num_rollouts, 1>::cost_traj::Zero(num_rollouts);
   for (int i = 0; i < num_rollouts; i++)
   {
     cost_traj(i) = distribution(generator);
