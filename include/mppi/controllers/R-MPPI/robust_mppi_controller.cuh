@@ -48,8 +48,16 @@ struct RobustMPPIParams : public ControllerParams<S_DIM, C_DIM>
   float value_function_threshold_ = 1000.0;
   int optimization_stride_ = 1;
   int num_candidate_nominal_states_ = 9;
-  dim3 eval_cost_kernel_dim_;
-  dim3 eval_dyn_kernel_dim_;
+  dim3 eval_cost_kernel_dim_ = dim3(0, 0, 0);
+  dim3 eval_dyn_kernel_dim_ = dim3(0, 0, 0);
+
+  enum class TOP_COPY_TYPE : int
+  {
+    COPY_TOP_REAL_SAMPLES_WITH_MATCHING_NOMINAL_SAMPLES = 0,
+    COPY_TOP_NOMINAL_SAMPLES_WITH_MATCHING_REAL_SAMPLES,
+    COPY_TOP_REAL_AND_NOMINAL_SAMPLES_INDEPENDENTLY
+  };
+  TOP_COPY_TYPE copy_type_ = TOP_COPY_TYPE::COPY_TOP_REAL_SAMPLES_WITH_MATCHING_NOMINAL_SAMPLES;
 };
 
 template <class DYN_T, class COST_T, class FB_T,
@@ -65,6 +73,7 @@ public:
 
   using control_array = typename PARENT_CLASS::control_array;
   using control_trajectory = typename PARENT_CLASS::control_trajectory;
+  using output_trajectory = typename PARENT_CLASS::output_trajectory;
   using state_trajectory = typename PARENT_CLASS::state_trajectory;
   using state_array = typename PARENT_CLASS::state_array;
   using sampled_cost_traj = typename PARENT_CLASS::sampled_cost_traj;
@@ -265,6 +274,7 @@ protected:
   control_trajectory nominal_control_trajectory_;
   state_trajectory nominal_state_trajectory_;
   sampled_cost_traj trajectory_costs_nominal_;
+  output_trajectory nominal_output_trajectory_;
 
   // Make the control history size flexible, related to issue #30
   Eigen::Matrix<float, DYN_T::CONTROL_DIM, 2> nominal_control_history_;  // History used for nominal_state IS
@@ -279,6 +289,10 @@ protected:
   void allocateCUDAMemory();
 
   void copyNominalControlToDevice(bool synchronize = true);
+
+  void copySampledControlFromDevice(bool synchronize = true);
+
+  void copyTopControlFromDevice(bool synchronize = true);
 
   void deallocateNominalStateCandidateMemory();
 
@@ -314,6 +328,7 @@ protected:
   int* importance_sampling_strides_d_ = nullptr;
   float* feedback_gain_array_d_ = nullptr;
   kernelType use_eval_kernel_ = kernelType::USE_SPLIT_KERNELS;
+  std::vector<int> nominal_top_n_sample_indices_;
 };
 
 #if __CUDACC__

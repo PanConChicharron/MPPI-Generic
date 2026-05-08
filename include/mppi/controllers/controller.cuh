@@ -831,10 +831,13 @@ public:
    * back from the GPU. Multiplier is an integer in case the nominal
    * control trajectories also need to be saved.
    */
-  void setPercentageSampledControlTrajectoriesHelper(float new_perc, int multiplier = 1)
+  void setPercentageSampledControlTrajectoriesHelper(float new_perc, int multiplier = 0)
   {
     perc_sampled_control_trajectories_ = new_perc;
-    sample_multiplier_ = multiplier;
+    if (multiplier > 0)
+    { // Don't change the multiplier unless someone explicitly passes a non-default value
+      sample_multiplier_ = multiplier;
+    }
     resizeSampledControlTrajectories(perc_sampled_control_trajectories_, sample_multiplier_,
                                      num_top_control_trajectories_);
   }
@@ -1065,6 +1068,8 @@ protected:
   float perc_sampled_control_trajectories_ = 0;  // Percentage of sampled trajectories to return
   int sample_multiplier_ = 1;                    // How many nominal states we are keeping track of
   int num_top_control_trajectories_ = 0;         // Top n sampled trajectories to visualize
+  std::vector<int> top_n_sample_indices_;
+  std::vector<int> random_sample_indices_;
   std::vector<float> top_n_costs_;
 
   curandGenerator_t gen_;
@@ -1115,7 +1120,8 @@ protected:
    */
   void copySampledControlFromDevice(bool synchronize = true);
 
-  std::pair<int, float> findMinIndexAndValue(std::vector<int>& temp_list);
+  std::pair<int, float> findMinIndexAndValue(std::vector<int>& temp_list, const Eigen::Ref<const sampled_cost_traj>& costs);
+
   void copyTopControlFromDevice(bool synchronize = true);
 
   void createAndSeedCUDARandomNumberGen();

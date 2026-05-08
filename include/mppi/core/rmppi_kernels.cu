@@ -637,10 +637,11 @@ __global__ void rolloutRMPPICostKernel(COST_T* __restrict__ costs, DYN_T* __rest
   y = &y_shared[(blockDim.x * thread_idz + last_y_index) * COST_T::OUTPUT_DIM];
   if (thread_idx == 0 && thread_idy == 0)
   {
-    *running_cost += costs->terminalCost(y, theta_c);
+    float terminal_cost = costs->terminalCost(y, theta_c);
+    *running_cost += terminal_cost;
     if (thread_idz != NOMINAL_STATE_IDX)
     {
-      *running_cost_extra += costs->terminalCost(y, theta_c);
+      *running_cost_extra += terminal_cost;
     }
     *running_cost /= ((float)num_timesteps);
     *running_cost_extra /= ((float)num_timesteps);
@@ -840,10 +841,11 @@ __global__ void rolloutRMPPIKernel(DYN_T* __restrict__ dynamics, COST_T* __restr
 
   if (thread_idy == 0)
   {
-    *running_cost += costs->terminalCost(y, theta_c_shared);
+    float terminal_cost = costs->terminalCost(y, theta_c_shared);
+    *running_cost += terminal_cost;
     if (thread_idz != NOMINAL_STATE_IDX)
     {
-      *running_cost_extra += costs->terminalCost(y, theta_c_shared);
+      *running_cost_extra += terminal_cost;
     }
     *running_cost /= ((float)num_timesteps);
     *running_cost_extra /= ((float)num_timesteps);
