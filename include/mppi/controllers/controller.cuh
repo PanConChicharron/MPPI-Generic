@@ -835,7 +835,7 @@ public:
   {
     perc_sampled_control_trajectories_ = new_perc;
     if (multiplier > 0)
-    { // Don't change the multiplier unless someone explicitly passes a non-default value
+    {  // Don't change the multiplier unless someone explicitly passes a non-default value
       sample_multiplier_ = multiplier;
     }
     resizeSampledControlTrajectories(perc_sampled_control_trajectories_, sample_multiplier_,
@@ -1120,7 +1120,8 @@ protected:
    */
   void copySampledControlFromDevice(bool synchronize = true);
 
-  std::pair<int, float> findMinIndexAndValue(std::vector<int>& temp_list, const Eigen::Ref<const sampled_cost_traj>& costs);
+  std::pair<int, float> findMinIndexAndValue(std::vector<int>& temp_list,
+                                             const Eigen::Ref<const sampled_cost_traj>& costs);
 
   void copyTopControlFromDevice(bool synchronize = true);
 

@@ -336,7 +336,7 @@ void RobustMPPI::setNumTimestepsHelper(const int num_timesteps, const bool updat
   PARENT_CLASS::resizeTimeTrajectory(nominal_control_trajectory_, num_timesteps);
   nominal_control_trajectory_ = this->params_.init_control_traj_;
   PARENT_CLASS::resizeTimeTrajectory(nominal_state_trajectory_, num_timesteps);
-  PARENT_CLASS::resizeSampledControlTrajectories(nominal_output_trajectory_, num_timesteps);
+  PARENT_CLASS::resizeTimeTrajectory(nominal_output_trajectory_, num_timesteps);
   resetCandidateCudaMem();
 }
 
@@ -900,7 +900,8 @@ void RobustMPPI::copyTopControlFromDevice(bool synchronize)
     HANDLE_ERROR(cudaMemcpyAsync(
         this->sampled_outputs_d_ + (2 * start_top_control_traj_index + this->getNumberTopControlTrajectories() + i) *
                                        this->getNumTimesteps() * DYN_T::OUTPUT_DIM,
-        this->output_d_ + (this->getNumRollouts() + this->top_n_sample_indices_[i]) * this->getNumTimesteps() * DYN_T::OUTPUT_DIM,
+        this->output_d_ +
+            (this->getNumRollouts() + this->top_n_sample_indices_[i]) * this->getNumTimesteps() * DYN_T::OUTPUT_DIM,
         sizeof(float) * this->getNumTimesteps() * DYN_T::OUTPUT_DIM, cudaMemcpyDeviceToDevice, this->vis_stream_));
     HANDLE_ERROR(cudaMemcpyAsync(this->sampler_->getVisControlSample(start_top_control_traj_index + i, 0, 1),
                                  this->sampler_->getControlSample(this->top_n_sample_indices_[i], 0, 1),
@@ -933,16 +934,17 @@ void RobustMPPI::copySampledControlFromDevice(bool synchronize)
   else
   {
     // Create sample list without replacement
-    this->random_sample_indices_ = mppi::math::sample_without_replacement(num_sampled_trajectories, this->getNumRollouts());
+    this->random_sample_indices_ =
+        mppi::math::sample_without_replacement(num_sampled_trajectories, this->getNumRollouts());
   }
 
   // this explicitly adds the optimized control sequence
   HANDLE_ERROR(cudaMemcpyAsync(this->sampled_outputs_d_, this->output_.data(),
                                sizeof(float) * this->getNumTimesteps() * DYN_T::OUTPUT_DIM, cudaMemcpyHostToDevice,
                                this->vis_stream_));
-  HANDLE_ERROR(cudaMemcpyAsync(this->sampler_->getVisControlSample(0, 0, 0), this->control_d_,
-                               sizeof(float) * this->getNumTimesteps() * DYN_T::CONTROL_DIM, cudaMemcpyDeviceToDevice,
-                               this->vis_stream_));
+  HANDLE_ERROR(cudaMemcpyAsync(
+      this->sampler_->getVisControlSample(0, 0, 0), this->sampler_->getDeviceOptimalControlSequence(0),
+      sizeof(float) * this->getNumTimesteps() * DYN_T::CONTROL_DIM, cudaMemcpyDeviceToDevice, this->vis_stream_));
 
   for (int i = 1; i < num_sampled_trajectories; i++)
   {

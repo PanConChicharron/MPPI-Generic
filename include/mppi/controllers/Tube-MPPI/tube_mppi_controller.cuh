@@ -18,6 +18,13 @@ template <int S_DIM, int C_DIM>
 struct TubeMPPIParams : public ControllerParams<S_DIM, C_DIM>
 {
   float nominal_threshold_ = 20;  // How much worse the actual system has to be compared to the nominal
+  enum class TOP_COPY_TYPE : int
+  {
+    COPY_TOP_REAL_SAMPLES_WITH_MATCHING_NOMINAL_SAMPLES = 0,
+    COPY_TOP_NOMINAL_SAMPLES_WITH_MATCHING_REAL_SAMPLES,
+    COPY_TOP_REAL_AND_NOMINAL_SAMPLES_INDEPENDENTLY
+  };
+  TOP_COPY_TYPE copy_type_ = TOP_COPY_TYPE::COPY_TOP_REAL_SAMPLES_WITH_MATCHING_NOMINAL_SAMPLES;
 };
 
 template <class DYN_T, class COST_T, class FB_T,
@@ -33,6 +40,7 @@ public:
   typedef Controller<DYN_T, COST_T, FB_T, SAMPLING_T, PARAMS_T> PARENT_CLASS;
   using control_array = typename PARENT_CLASS::control_array;
   using control_trajectory = typename PARENT_CLASS::control_trajectory;
+  using output_trajectory = typename PARENT_CLASS::output_trajectory;
   using state_trajectory = typename PARENT_CLASS::state_trajectory;
   using state_array = typename PARENT_CLASS::state_array;
   using output_array = typename PARENT_CLASS::output_array;
@@ -123,6 +131,7 @@ private:
   control_trajectory nominal_control_trajectory_;
   state_trajectory nominal_state_trajectory_;
   sampled_cost_traj trajectory_costs_nominal_;
+  output_trajectory nominal_output_trajectory_;
 
   // Check to see if nominal state has been initialized
   bool nominalStateInit_ = false;
@@ -132,6 +141,12 @@ private:
 protected:
   // TODO move up and generalize, pass in what to copy and initial location
   void copyControlToDevice(bool synchronize = true);
+
+  void copySampledControlFromDevice(bool synchronize = true);
+
+  void copyTopControlFromDevice(bool synchronize = true);
+
+  std::vector<int> nominal_top_n_sample_indices_;
 
 private:
   // ======== PURE VIRTUAL =========
