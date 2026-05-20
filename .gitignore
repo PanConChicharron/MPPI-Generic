@@ -51,6 +51,12 @@ compile_commands.json
 # resouces folder
 resource
 
+# log files
+*.csv
+
+#images
+*.png
+
 # video files
 *.mp4
 *.mpeg

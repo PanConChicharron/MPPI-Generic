@@ -54,6 +54,7 @@ endforeach()
 include_directories(${PROJECT_BINARY_DIR}/include)
 message("")
 
+add_subdirectory(path)
 add_subdirectory(dynamics)
 add_subdirectory(cost_functions)
 add_subdirectory(feedback_controllers)

@@ -65,7 +65,12 @@ if (CMAKE_VERSION VERSION_LESS 3.24)
   if (NOT DEFINED MPPI_ARCH_FLAGS)
     # More info for autodetection:
     # https://stackoverflow.com/questions/35485087/determining-which-gencode-compute-arch-values-i-need-for-nvcc-within-cmak
-    CUDA_SELECT_NVCC_ARCH_FLAGS(MPPI_ARCH_FLAGS ${MPPI_CUDA_ARCH_LIST})
+    set(_mppi_nvcc_arch_list "${MPPI_CUDA_ARCH_LIST}")
+    if ("${_mppi_nvcc_arch_list}" STREQUAL "" AND MPPI_USE_CUDA_BARRIERS)
+      set(_mppi_nvcc_arch_list "Auto")
+      message(STATUS "MPPI_USE_CUDA_BARRIERS=ON: limiting CUDA arch autodetection to local GPU(s)")
+    endif()
+    CUDA_SELECT_NVCC_ARCH_FLAGS(MPPI_ARCH_FLAGS ${_mppi_nvcc_arch_list})
 
     if (MPPI_ARCH_FLAGS STREQUAL "")
       set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -maxrregcount=32 -arch=sm_35")
