@@ -63,47 +63,83 @@ def load_log(csv_path: Path) -> dict:
     with csv_path.open(newline="") as f:
         reader = csv.reader(f)
         header = next(reader)
-        rows = [row for row in reader if row]
-    ncol = len(rows[0]) if rows else 0
-    data = np.array([[float(x) for x in row] for row in rows], dtype=float)
+        raw_rows = [row for row in reader if row]
+
     names = [h.strip() for h in header]
     name_to_idx = {n: i for i, n in enumerate(names)}
 
-    def col(name: str, fallback: int) -> np.ndarray:
-        if name in name_to_idx:
+    # Keep only rows that are all numeric (skip debug text accidentally written to CSV).
+    numeric_rows: list[list[float]] = []
+    for row in raw_rows:
+        try:
+            numeric_rows.append([float(x) for x in row])
+        except ValueError:
+            continue
+    if not numeric_rows:
+        raise ValueError(f"no numeric data rows in {csv_path}")
+
+    ncol = len(numeric_rows[0])
+    if any(len(r) != ncol for r in numeric_rows):
+        raise ValueError(f"inconsistent column count in {csv_path} (expected {ncol})")
+    data = np.array(numeric_rows, dtype=float)
+
+    def by_idx(i: int) -> np.ndarray:
+        if i < 0 or i >= ncol:
+            raise IndexError(f"column index {i} out of range for {ncol} columns")
+        return data[:, i]
+
+    def col(name: str, fallback: int | None) -> np.ndarray | None:
+        if name in name_to_idx and name_to_idx[name] < ncol:
             return data[:, name_to_idx[name]]
-        if 0 <= fallback < ncol:
+        if fallback is not None and 0 <= fallback < ncol:
             return data[:, fallback]
-        raise KeyError(f"column {name!r} not in log (have {names})")
+        return None
 
-    out: dict = {"names": names, "ncol": ncol, "t": col("t", 0)}
+    out: dict = {"names": names, "ncol": ncol, "t": by_idx(0)}
 
-    # Detect dubins bicycle log (accel/steer controls)
-    is_dubins = "u_accel" in name_to_idx or (
-        ncol == 18 and "u_throttle" not in name_to_idx and "ref_x" in name_to_idx
+    # Dubins bicycle: u_accel/u_steer (not throttle). Header may list 18 names while
+    # rows only carry 14 fields (compact stadium logger).
+    is_dubins = (
+        ncol in (14, 18)
+        and "u_throttle" not in name_to_idx
+        and (col("u_accel", 7) is not None or ncol == 14)
     )
-
     out["is_dubins"] = is_dubins
-    out["px"] = col("pos_x", 1)
-    out["py"] = col("pos_y", 2)
-    out["yaw"] = col("yaw", 3)
-    out["vx"] = col("vel_x", 4)
-    out["steer"] = col("steer_angle", 5)
+    out["px"] = col("pos_x", 1) if col("pos_x", 1) is not None else by_idx(1)
+    out["py"] = col("pos_y", 2) if col("pos_y", 2) is not None else by_idx(2)
+    out["yaw"] = col("yaw", 3) if col("yaw", 3) is not None else by_idx(3)
+    out["vx"] = col("vel_x", 4) if col("vel_x", 4) is not None else by_idx(4)
+    out["steer"] = col("steer_angle", 5) if col("steer_angle", 5) is not None else by_idx(5)
 
-    if is_dubins:
-        out["brake"] = col("brake_state", 6) if "brake_state" in name_to_idx else np.zeros_like(out["t"])
-        out["u0"] = col("u_accel", 7)
-        out["u1"] = col("u_steer", 8)
-        out["nom_u0"] = col("nom_u_accel", 9) if "nom_u_accel" in name_to_idx else None
-        out["nom_u1"] = col("nom_u_steer", 10) if "nom_u_steer" in name_to_idx else None
+    if is_dubins and ncol == 14:
+        # Compact layout from dubins_stadium_path_tracking_example (no nom_u / ref_x,y in row).
+        out["brake"] = by_idx(6)
+        out["u0"] = by_idx(7)
+        out["u1"] = by_idx(8)
+        out["nom_u0"] = out["nom_u1"] = None
+        out["path_u0"] = out["path_u1"] = None
+        out["rpx"] = out["rpy"] = None
+        out["ryaw"] = by_idx(9)
+        out["ref_v"] = by_idx(10)
+        out["arc_s"] = by_idx(11)
+        out["lat_err"] = by_idx(12)
+        out["baseline"] = by_idx(13)
+        out["u0_label"] = "u accel [m/s²]"
+        out["u1_label"] = "u steer [rad]"
+    elif is_dubins:
+        out["brake"] = col("brake_state", 6) if col("brake_state", 6) is not None else np.zeros_like(out["t"])
+        out["u0"] = col("u_accel", 7) if col("u_accel", 7) is not None else by_idx(7)
+        out["u1"] = col("u_steer", 8) if col("u_steer", 8) is not None else by_idx(8)
+        out["nom_u0"] = col("nom_u_accel", 9)
+        out["nom_u1"] = col("nom_u_steer", 10)
         out["path_u0"] = out["path_u1"] = None
         out["rpx"] = col("ref_x", 11)
         out["rpy"] = col("ref_y", 12)
         out["ryaw"] = col("ref_yaw", 13)
         out["ref_v"] = col("ref_v", 14)
-        out["arc_s"] = col("arc_s", 15) if "arc_s" in name_to_idx else None
-        out["lat_err"] = col("lat_err", 16) if "lat_err" in name_to_idx else None
-        out["baseline"] = col("baseline", 17)
+        out["arc_s"] = col("arc_s", 15)
+        out["lat_err"] = col("lat_err", 16)
+        out["baseline"] = col("baseline", 17) if col("baseline", 17) is not None else by_idx(17)
         out["u0_label"] = "u accel [m/s²]"
         out["u1_label"] = "u steer [rad]"
     elif ncol >= 19:
@@ -228,11 +264,25 @@ def main() -> int:
 
     title_suffix = " (Dubins bicycle)" if is_dubins else ""
     n_progress_rows = 2 if lat_err is not None else 1
-    fig = plt.figure(figsize=(12, 11 + 0.8 * (n_progress_rows - 1)), constrained_layout=True)
+    has_nom_compare = nom_u0 is not None and nom_u1 is not None
+    if not has_nom_compare and is_dubins:
+        print(
+            "note: log has no nom_u_accel / nom_u_steer columns; re-run example after rebuilding "
+            "so CSV rows match the 18-column header.",
+            file=sys.stderr,
+        )
+    n_nom_rows = 2 if has_nom_compare else 0
+    height_ratios = [1.2, 1, 1, 1] + [0.75] * n_progress_rows
+    if has_nom_compare:
+        height_ratios += [1.05, 0.85]  # MPPI vs nominal overlay, then |delta|
+    fig = plt.figure(
+        figsize=(12, 11 + 0.8 * (n_progress_rows - 1) + 1.7 * n_nom_rows),
+        constrained_layout=True,
+    )
     gs = fig.add_gridspec(
-        4 + n_progress_rows,
+        4 + n_progress_rows + n_nom_rows,
         2,
-        height_ratios=[1.2, 1, 1, 1] + [0.75] * n_progress_rows,
+        height_ratios=height_ratios,
         width_ratios=[1, 1],
     )
 
@@ -242,7 +292,8 @@ def main() -> int:
     ax_xy.plot(px, py, "k-", linewidth=0.7, alpha=0.4, label="vehicle path")
     if have_cl and cpx is not None:
         ax_xy.plot(cpx, cpy, "r-", linewidth=1.4, label="ref centerline", alpha=0.95, zorder=2)
-    ax_xy.plot(rpx, rpy, "r--", linewidth=1.1, label="ref (horizon t=0)", alpha=0.65)
+    if rpx is not None and rpy is not None:
+        ax_xy.plot(rpx, rpy, "r--", linewidth=1.1, label="ref (horizon t=0)", alpha=0.65)
     ax_xy.set_aspect("equal", adjustable="datalim")
     ax_xy.set_xlabel("x [m]")
     ax_xy.set_ylabel("y [m]")
@@ -257,13 +308,13 @@ def main() -> int:
         (fig.add_subplot(gs[2, 1]), vx, "vel x [m/s]", "C2"),
     ]:
         ax.plot(t, yv, color=c, linewidth=1.2)
-        if name == "pos x [m]":
+        if name == "pos x [m]" and rpx is not None:
             ax.plot(t, rpx, "r--", alpha=0.6, label="ref")
-        elif name == "pos y [m]":
+        elif name == "pos y [m]" and rpy is not None:
             ax.plot(t, rpy, "r--", alpha=0.6, label="ref")
-        elif name == "yaw [rad]":
+        elif name == "yaw [rad]" and ryaw is not None:
             ax.plot(t, ryaw, "r--", alpha=0.6, label="ref")
-        elif name == "vel x [m/s]":
+        elif name == "vel x [m/s]" and ref_v is not None:
             ax.plot(t, ref_v, "r--", alpha=0.6, label="ref")
         ax.set_ylabel(name)
         ax.set_xlabel("t [s]")
@@ -279,13 +330,29 @@ def main() -> int:
     ax_st.legend(loc="best", fontsize=7)
 
     ax_br = fig.add_subplot(gs[3, 1])
-    ax_br.plot(t, u0, label=u0_label, color="C4", linewidth=1.2)
-    ax_br.plot(t, u1, label=u1_label, color="C5", alpha=0.85, linewidth=1.2)
-    if nom_u0 is not None:
-        nom0_lbl = "nom u accel (MPPI mean)" if is_dubins else "nom u throttle (MPPI mean)"
-        nom1_lbl = "nom u steer (MPPI mean)"
-        ax_br.plot(t, nom_u0, "--", color="C4", linewidth=1.0, alpha=0.75, label=nom0_lbl)
-        ax_br.plot(t, nom_u1, "--", color="C5", linewidth=1.0, alpha=0.75, label=nom1_lbl)
+    mppi_u0_lbl = f"MPPI applied ({u0_label})" if has_nom_compare else u0_label
+    mppi_u1_lbl = f"MPPI applied ({u1_label})" if has_nom_compare else u1_label
+    ax_br.plot(t, u0, label=mppi_u0_lbl, color="C4", linewidth=1.2)
+    ax_br.plot(t, u1, label=mppi_u1_lbl, color="C5", alpha=0.85, linewidth=1.2)
+    if has_nom_compare:
+        ax_br.plot(
+            t,
+            nom_u0,
+            "--",
+            color="C4",
+            linewidth=1.4,
+            alpha=0.9,
+            label="feedforward nominal (u_nom)",
+        )
+        ax_br.plot(
+            t,
+            nom_u1,
+            "--",
+            color="C5",
+            linewidth=1.4,
+            alpha=0.9,
+            label="feedforward nominal steer (u_nom)",
+        )
     if path_u0 is not None:
         ax_br.plot(t, path_u0, ":", color="C4", linewidth=1.0, alpha=0.65, label="path u throttle")
         ax_br.plot(t, path_u1, ":", color="C5", linewidth=1.0, alpha=0.65, label="path u steer")
@@ -293,10 +360,63 @@ def main() -> int:
         ax_br.plot(t, brake, ":", color="0.35", linewidth=1.0, label="brake state")
     ax_br.set_ylabel("controls")
     ax_br.set_xlabel("t [s]")
+    ax_br.set_title("Applied controls (overview)" if has_nom_compare else None)
     ax_br.legend(loc="best", fontsize=6)
     ax_br.grid(True, alpha=0.3)
 
-    row_prog = 4
+    row_after_controls = 4
+    if has_nom_compare:
+        row_cmp = row_after_controls
+        du0 = u0 - nom_u0
+        du1 = u1 - nom_u1
+        tol = 1.0e-6
+        n_equal = int(np.sum((np.abs(du0) < tol) & (np.abs(du1) < tol)))
+        print(
+            f"MPPI vs feedforward nominal: max |Δaccel|={np.max(np.abs(du0)):.6g}  "
+            f"max |Δsteer|={np.max(np.abs(du1)):.6g}  "
+            f"RMS Δaccel={np.sqrt(np.mean(du0**2)):.6g}  RMS Δsteer={np.sqrt(np.mean(du1**2)):.6g}  "
+            f"steps with u≈u_nom (both channels): {n_equal}/{len(t)}",
+            file=sys.stderr,
+        )
+
+        ax_u0 = fig.add_subplot(gs[row_cmp, 0])
+        ax_u0.plot(t, u0, "-", color="C4", linewidth=1.3, label="MPPI applied")
+        ax_u0.plot(t, nom_u0, "--", color="C2", linewidth=1.3, label="feedforward u_nom")
+        ax_u0.set_ylabel(u0_label)
+        ax_u0.set_title("Longitudinal: MPPI vs nominal")
+        ax_u0.grid(True, alpha=0.3)
+        ax_u0.legend(loc="best", fontsize=7)
+
+        ax_u1 = fig.add_subplot(gs[row_cmp, 1])
+        ax_u1.plot(t, u1, "-", color="C5", linewidth=1.3, label="MPPI applied")
+        ax_u1.plot(t, nom_u1, "--", color="C2", linewidth=1.3, label="feedforward u_nom")
+        ax_u1.set_ylabel(u1_label)
+        ax_u1.set_title("Steering: MPPI vs nominal")
+        ax_u1.grid(True, alpha=0.3)
+        ax_u1.legend(loc="best", fontsize=7)
+
+        row_diff = row_cmp + 1
+        ax_d0 = fig.add_subplot(gs[row_diff, 0])
+        ax_d0.plot(t, du0, color="C4", linewidth=1.1, label="u_mppi − u_nom")
+        ax_d0.axhline(0.0, color="0.4", linewidth=0.8, linestyle=":")
+        ax_d0.set_ylabel(f"Δ {u0_label}")
+        ax_d0.set_xlabel("t [s]")
+        ax_d0.set_title("|MPPI − nominal| (accel)")
+        ax_d0.grid(True, alpha=0.3)
+        ax_d0.legend(loc="best", fontsize=7)
+
+        ax_d1 = fig.add_subplot(gs[row_diff, 1])
+        ax_d1.plot(t, du1, color="C5", linewidth=1.1, label="u_mppi − u_nom")
+        ax_d1.axhline(0.0, color="0.4", linewidth=0.8, linestyle=":")
+        ax_d1.set_ylabel(f"Δ {u1_label}")
+        ax_d1.set_xlabel("t [s]")
+        ax_d1.set_title("|MPPI − nominal| (steer)")
+        ax_d1.grid(True, alpha=0.3)
+        ax_d1.legend(loc="best", fontsize=7)
+
+        row_prog = row_diff + 1
+    else:
+        row_prog = row_after_controls
     if arc_s is not None:
         ax_s = fig.add_subplot(gs[row_prog, :])
         ax_s.plot(t, arc_s, color="C6", linewidth=1.2, label="arc s (projected)")

@@ -150,8 +150,8 @@ int main(int argc, char** argv)
   cost.setParams(cost_params);
 
   SAMPLER::SAMPLING_PARAMS_T sp{};
-  sp.std_dev[static_cast<int>(DubinsBicycleParams::ControlIndex::ACCEL)] = 0.15F;
-  sp.std_dev[static_cast<int>(DubinsBicycleParams::ControlIndex::STEER)] = 0.04F;
+  sp.std_dev[static_cast<int>(DubinsBicycleParams::ControlIndex::ACCEL)] = 1.0F;
+  sp.std_dev[static_cast<int>(DubinsBicycleParams::ControlIndex::STEER)] = 0.225F;
   sp.control_cost_coeff[0] = cost_params.control_cost_coeff[0];
   sp.control_cost_coeff[1] = cost_params.control_cost_coeff[1];
   sp.sum_strides = std::max(32, (kNumRollouts + 1023) / 1024);
@@ -225,13 +225,14 @@ int main(int argc, char** argv)
 
     mppi::path::fillNominalControlFromReference(u_nom, x, ref, dyn, kDt, &path);
     controller.updateImportanceSampler(u_nom);
+
     controller.computeControl(x, 1);
-    const DYN::control_array u_apply = controller.getControlSeq().col(0);
-    DYN::control_array u = u_apply;
-    clipControl(dyn, u);
+
+    DYN::control_array control;
+    control = controller.getControlSeq().col(0);
+    model.enforceConstraints(x, control);
+    model.step(x, x_next, xdot, control, y, static_cast<float>(k), kDt);
     const float baseline = static_cast<float>(controller.getBaselineCost());
-    model.enforceConstraints(x, u);
-    model.step(x, x_next, xdot, u, y, static_cast<float>(k), kDt);
 
     const mppi::path::PathReferenceSample& r0 = ref.front();
     const float t_end = static_cast<float>(k + 1) * kDt;
@@ -240,19 +241,28 @@ int main(int argc, char** argv)
         << x_next(static_cast<int>(DubinsBicycleParams::StateIndex::YAW)) << ","
         << x_next(static_cast<int>(DubinsBicycleParams::StateIndex::VEL_X)) << ","
         << x_next(static_cast<int>(DubinsBicycleParams::StateIndex::STEER_ANGLE)) << ",0,"
-        << u(static_cast<int>(DubinsBicycleParams::ControlIndex::ACCEL)) << ","
-        << u(static_cast<int>(DubinsBicycleParams::ControlIndex::STEER)) << ","
-        << u_apply(static_cast<int>(DubinsBicycleParams::ControlIndex::ACCEL)) << ","
-        << u_apply(static_cast<int>(DubinsBicycleParams::ControlIndex::STEER)) << "," << r0.x << "," << r0.y << ","
+        << control(static_cast<int>(DubinsBicycleParams::ControlIndex::ACCEL)) << ","
+        << control(static_cast<int>(DubinsBicycleParams::ControlIndex::STEER)) << ","
+        << u_nom(static_cast<int>(DubinsBicycleParams::ControlIndex::ACCEL), 0) << ","
+        << u_nom(static_cast<int>(DubinsBicycleParams::ControlIndex::STEER), 0) << "," << r0.x << "," << r0.y << ","
         << r0.yaw << "," << r0.v << "," << s_prog << "," << proj.signed_lateral_error << "," << baseline << "\n";
-
     x = x_next;
     controller.slideControlSequence(1);
 
     if (k % 50 == 0)
     {
       std::cout << "t=" << t_end << "  s=" << s_prog << "  lat=" << proj.signed_lateral_error
-                << "  v=" << x(static_cast<int>(DubinsBicycleParams::StateIndex::VEL_X)) << "\n";
+                << "  v=" << x(static_cast<int>(DubinsBicycleParams::StateIndex::VEL_X)) 
+                << "(x, y, yaw, vel, steer) = " 
+                << x_next(static_cast<int>(DubinsBicycleParams::StateIndex::POS_X)) << ","
+                << x_next(static_cast<int>(DubinsBicycleParams::StateIndex::POS_Y)) << ","
+                << x_next(static_cast<int>(DubinsBicycleParams::StateIndex::YAW)) << ","
+                << x_next(static_cast<int>(DubinsBicycleParams::StateIndex::VEL_X)) << ","
+                << x_next(static_cast<int>(DubinsBicycleParams::StateIndex::STEER_ANGLE)) << ", "
+                << "(a, steer) = " 
+                << control(static_cast<int>(DubinsBicycleParams::ControlIndex::ACCEL)) << ","
+                << control(static_cast<int>(DubinsBicycleParams::ControlIndex::STEER)) << "," 
+                << "baseline = " << baseline << "\n";
     }
   }
 
