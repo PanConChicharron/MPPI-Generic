@@ -43,7 +43,7 @@ struct DubinsBicycleParams : public DynamicsParams
 
   float wheel_base = 0.32F;
   /** First-order steering: steer_dot = (u_steer - steer) / steer_time_constant */
-  float steer_time_constant = 0.08F;
+  float steer_time_constant = 0.2F;
   float max_steer_angle = 0.45F;
   float max_steer_rate = 3.0F;
   float max_accel = 4.0F;

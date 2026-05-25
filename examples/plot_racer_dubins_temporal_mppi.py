@@ -95,12 +95,18 @@ def load_log(csv_path: Path) -> dict:
             return data[:, fallback]
         return None
 
-    out: dict = {"names": names, "ncol": ncol, "t": by_idx(0)}
+    out: dict = {
+        "names": names,
+        "ncol": ncol,
+        "t": by_idx(0),
+        "nominal_cost": None,
+        "mppi_applied_cost": None,
+    }
 
     # Dubins bicycle: u_accel/u_steer (not throttle). Header may list 18 names while
     # rows only carry 14 fields (compact stadium logger).
     is_dubins = (
-        ncol in (14, 18)
+        ncol in (14, 18, 20)
         and "u_throttle" not in name_to_idx
         and (col("u_accel", 7) is not None or ncol == 14)
     )
@@ -123,6 +129,7 @@ def load_log(csv_path: Path) -> dict:
         out["ref_v"] = by_idx(10)
         out["arc_s"] = by_idx(11)
         out["lat_err"] = by_idx(12)
+        out["nominal_cost"] = out["mppi_applied_cost"] = None
         out["baseline"] = by_idx(13)
         out["u0_label"] = "u accel [m/s²]"
         out["u1_label"] = "u steer [rad]"
@@ -139,7 +146,9 @@ def load_log(csv_path: Path) -> dict:
         out["ref_v"] = col("ref_v", 14)
         out["arc_s"] = col("arc_s", 15)
         out["lat_err"] = col("lat_err", 16)
-        out["baseline"] = col("baseline", 17) if col("baseline", 17) is not None else by_idx(17)
+        out["nominal_cost"] = col("nominal_cost", 17)
+        out["mppi_applied_cost"] = col("mppi_applied_cost", 18)
+        out["baseline"] = col("baseline", 19) if col("baseline", 19) is not None else col("baseline", 17)
         out["u0_label"] = "u accel [m/s²]"
         out["u1_label"] = "u steer [rad]"
     elif ncol >= 19:
@@ -239,6 +248,8 @@ def main() -> int:
     rpx, rpy, ryaw, ref_v = log["rpx"], log["rpy"], log["ryaw"], log["ref_v"]
     arc_s = log["arc_s"]
     lat_err = log["lat_err"]
+    nominal_cost = log["nominal_cost"]
+    mppi_applied_cost = log["mppi_applied_cost"]
     baseline = log["baseline"]
     is_dubins = log["is_dubins"]
     u0_label, u1_label = log["u0_label"], log["u1_label"]
@@ -467,11 +478,39 @@ def main() -> int:
         ax_lat.legend(loc="best", fontsize=7)
         ax_lat.grid(True, alpha=0.3)
 
-    fig2, axb = plt.subplots(1, 1, figsize=(10, 2.5), constrained_layout=True)
-    axb.plot(t, baseline, color="0.2", linewidth=1.0)
-    axb.set_ylabel("MPPI baseline cost")
+    fig2, axb = plt.subplots(1, 1, figsize=(10, 3.2), constrained_layout=True)
+    if nominal_cost is not None and mppi_applied_cost is not None:
+        axb.plot(
+            t,
+            nominal_cost,
+            "--",
+            color="C2",
+            linewidth=1.2,
+            label="feedforward u_nom (1-step running cost)",
+        )
+        axb.plot(
+            t,
+            mppi_applied_cost,
+            "-",
+            color="C4",
+            linewidth=1.2,
+            label="MPPI applied u (1-step running cost)",
+        )
+        axb.plot(
+            t,
+            baseline,
+            ":",
+            color="0.35",
+            linewidth=1.1,
+            label="MPPI min rollout cost (best of 32k samples)",
+        )
+        axb.set_title("Per-step cost: nominal vs MPPI applied vs best rollout")
+    else:
+        axb.plot(t, baseline, color="0.2", linewidth=1.0, label="baseline (min rollout cost)")
+        axb.set_title("MPPI minimum rollout cost (re-run example for nominal/mppi_applied_cost columns)")
+    axb.set_ylabel("cost")
     axb.set_xlabel("t [s]")
-    axb.set_title("Nominal trajectory cost (after optimization)")
+    axb.legend(loc="best", fontsize=7)
     axb.grid(True, alpha=0.3)
 
     if save_files:

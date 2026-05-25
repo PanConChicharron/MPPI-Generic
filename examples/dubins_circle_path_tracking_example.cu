@@ -5,6 +5,8 @@
  * Run:   ./build/examples/dubins_circle_path_tracking_example [log.csv]
  * Plot:  python3 examples/plot_racer_dubins_temporal_mppi.py dubins_circle_path_tracking_log.csv
  */
+#include "mppi_rollout_csv.hpp"
+
 #include <mppi/controllers/MPPI/mppi_controller.cuh>
 #include <mppi/cost_functions/path_tracking/path_tracking_cost.cuh>
 #include <mppi/dynamics/dubins_bicycle/dubins_bicycle.cuh>
@@ -56,31 +58,6 @@ void clipControl(const DubinsBicycleParams& p, DYN::control_array& u)
       std::max(-p.max_steer_angle, std::min(u(static_cast<int>(DubinsBicycleParams::ControlIndex::STEER)), p.max_steer_angle));
 }
 
-void writeCenterlineCsv(const mppi::path::Path2D& path, const std::string& log_csv_path)
-{
-  std::string out = log_csv_path;
-  const size_t n = out.size();
-  if (n > 4U && out.compare(n - 4U, 4U, ".csv") == 0)
-  {
-    out.insert(n - 4U, "_centerline");
-  }
-  else
-  {
-    out += "_centerline.csv";
-  }
-  std::ofstream f(out.c_str());
-  if (!f)
-  {
-    return;
-  }
-  f << "x_m,y_m\n";
-  for (const mppi::path::PathAnchor& a : path.anchors())
-  {
-    f << a.x << "," << a.y << "\n";
-  }
-  std::cout << "Wrote centerline for plot: " << out << "\n";
-}
-
 int simStepsForLaps(const mppi::path::Path2D& path, const float laps)
 {
   const float lap_time = path.length() / kVMax;
@@ -102,7 +79,7 @@ int main(int argc, char** argv)
   const mppi::path::Path2D path =
       mppi::path::Path2D::circle(kCircleCenterX, kCircleCenterY, kCircleRadius, kCircleTheta0, kCirclePlotSamples);
   const int kSimSteps = simStepsForLaps(path, kSimLaps);
-  writeCenterlineCsv(path, log_path);
+  mppi::rollout_csv::writeCenterlineForLog(path, log_path);
 
   mppi::path::PathReferenceGenerator ref_gen(kDt);
   ref_gen.setSpeedCap(kVMax);
@@ -131,7 +108,15 @@ int main(int argc, char** argv)
 
   FB feedback(&model, kDt);
   Mppi::control_trajectory u_nom = Mppi::control_trajectory::Zero();
-  Mppi controller(&model, &cost, &feedback, &sampler, kDt, 1, 0.25F, 0.0F, kMppiHorizon, u_nom);
+  // lambda is the MPPI temperature in w_i = exp(-(c_i - baseline) / lambda).
+  // With these cost weights the per-step running cost runs at ~150 and per-rollout totals are
+  // ~8000, so the cost spread between baseline and "good" rollouts is on the order of 100s.
+  // lambda << that → argmin behavior (only the single best rollout contributes); lambda >> that →
+  // weights collapse to uniform and the optimal control regresses to the noise mean. 100 lands
+  // in the healthy "soft mixture" range. See dubins_circle_mppi_rollout_analysis_example.cu for
+  // the diagnostic methodology.
+  constexpr float kMppiLambda = 100.0F;
+  Mppi controller(&model, &cost, &feedback, &sampler, kDt, 1, kMppiLambda, 0.0F, kMppiHorizon, u_nom);
   {
     auto cp = controller.getParams();
     cp.dynamics_rollout_dim_ = dim3(32, 2, 1);

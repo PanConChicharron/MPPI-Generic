@@ -25,7 +25,7 @@ option(MPPI_USE_CUDA_BARRIERS_COST "Compile MPPI-Generic with cuda barriers for 
 option(MPPI_USE_CUDA_BARRIERS_DYN "Compile MPPI-Generic with cuda barriers for dynamics-only kernels when general barrier support is enabled." ON)
 option(MPPI_USE_CUDA_BARRIERS_ROLLOUT "Compile MPPI-Generic with cuda barriers for combined kernels when general barrier support is enabled." ON)
 option(MPPI_EXPORT_PACKAGE "Export this folder as the MPPI installation to the global CMake package repository" OFF)
-set(MPPI_CUDA_ARCH_LIST "" CACHE STRING "Specific CUDA Architectures to build for. Leave empty for automatic selection.")
+set(MPPI_CUDA_ARCH_LIST "" CACHE STRING "CUDA arch(s) to build for. Empty = auto. Examples: 75 or 7.5 (Turing), 86 or 8.6 (Ampere), 75;86, Auto.")
 
 # Configure CMake Cuda Flags for MPPI
 set(CMAKE_MODULE_PATH "${CMAKE_MODULE_PATH}" "${CMAKE_CURRENT_SOURCE_DIR}/cmake")

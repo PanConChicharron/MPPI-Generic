@@ -20,13 +20,15 @@ template <int REF_HORIZON>
 inline void fillPathTrackingCostWeights(PathTrackingCostParams<REF_HORIZON>& p, const float w_pos = 10.0F,
                                         const float w_heading_so2 = 1.0F, const float w_vel = 5.0F,
                                         const float w_lat_accel = 0.0F, const float w_lat_jerk = 0.0F,
-                                        const float w_accel = 0.05F, const float w_steer = 0.1F)
+                                        const float w_steer_dot = 0.0F, const float w_accel = 0.05F,
+                                        const float w_steer = 0.1F)
 {
   p.w_pos = w_pos;
   p.w_heading_so2 = w_heading_so2;
   p.w_vel = w_vel;
   p.w_lat_accel = w_lat_accel;
   p.w_lat_jerk = w_lat_jerk;
+  p.w_steer_dot = w_steer_dot;
   p.control_cost_coeff[static_cast<int>(DubinsBicycleParams::ControlIndex::ACCEL)] = w_accel;
   p.control_cost_coeff[static_cast<int>(DubinsBicycleParams::ControlIndex::STEER)] = w_steer;
 }
