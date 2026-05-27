@@ -17,6 +17,8 @@
 #include <mppi/path/path2d.hpp>
 #include <mppi/sampling_distributions/gaussian/gaussian.cuh>
 
+#include <opencv2/opencv.hpp>
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -63,11 +65,62 @@ namespace
     const float lap_time = path.length() / kVMax;
     return static_cast<int>(std::ceil(laps * lap_time / kDt));
   }
+
+  cv::Point2f worldToPixel(float x, float y, int img_w, int img_h)
+  {
+    // Stadium width is ~60m, height ~20m.
+    // Use 12 px/m scale to fit 60m into 800px (720px) with margin.
+    const float scale = 12.0F;
+    const float u = static_cast<float>(img_w) / 2.0F + x * scale;
+    const float v = static_cast<float>(img_h) / 2.0F - y * scale;
+    return cv::Point2f(u, v);
+  }
+
+  void draw_centerline(cv::Mat& img, const mppi::path::Path2D& path)
+  {
+    cv::Mat overlay = img.clone();
+    const auto& anchors = path.anchors();
+    for (size_t i = 0; i < anchors.size() - 1; ++i)
+    {
+      cv::line(overlay, worldToPixel(anchors[i].x, anchors[i].y, img.cols, img.rows),
+               worldToPixel(anchors[i + 1].x, anchors[i + 1].y, img.cols, img.rows),
+               cv::Scalar(128, 128, 128), 2);
+    }
+    cv::addWeighted(overlay, 0.5, img, 0.5, 0, img);
+  }
+
+  void draw_reference_path(cv::Mat& img, const std::vector<mppi::path::PathReferenceSample>& ref)
+  {
+    if (ref.size() < 2) return;
+    cv::Mat overlay = img.clone();
+    for (size_t i = 0; i < ref.size() - 1; ++i)
+    {
+      cv::line(overlay, worldToPixel(ref[i].x, ref[i].y, img.cols, img.rows),
+               worldToPixel(ref[i + 1].x, ref[i + 1].y, img.cols, img.rows),
+               cv::Scalar(255, 0, 0), 2); // Blue
+    }
+    cv::addWeighted(overlay, 0.5, img, 0.5, 0, img);
+  }
+
+  void draw_trajectory(cv::Mat& img, const Mppi::state_trajectory& traj)
+  {
+    cv::Mat overlay = img.clone();
+    const int x_idx = static_cast<int>(DubinsBicycleParams::StateIndex::POS_X);
+    const int y_idx = static_cast<int>(DubinsBicycleParams::StateIndex::POS_Y);
+    for (int i = 0; i < traj.cols() - 1; ++i)
+    {
+      cv::line(overlay, worldToPixel(traj(x_idx, i), traj(y_idx, i), img.cols, img.rows),
+               worldToPixel(traj(x_idx, i + 1), traj(y_idx, i + 1), img.cols, img.rows),
+               cv::Scalar(0, 255, 0), 2); // Green
+    }
+    cv::addWeighted(overlay, 0.75, img, 0.25, 0, img);
+  }
 }  // namespace
 
 int main(int argc, char** argv)
 {
     std::string log_path = "dubins_stadium_path_tracking_log.csv";
+    std::string video_path = "dubins_stadium_path_tracking_log.mp4"; // path to the video file to generate with OpenCV
 
     const mppi::path::Path2D path = mppi::path::Path2D::stadium(kStraightLength, kTurnRadius, kSamplesPerArc);
     const size_t num_sim_steps = simStepsForLaps(path, kSimLaps);
@@ -126,13 +179,6 @@ int main(int argc, char** argv)
     x(static_cast<int>(DubinsBicycleParams::StateIndex::YAW)) = p0.yaw;
     x(static_cast<int>(DubinsBicycleParams::StateIndex::VEL_X)) = kTargetSpeed;
 
-    std::vector<DYN::state_array> x_history;
-    std::vector<DYN::control_array> u_history;
-    std::vector<DYN::output_array> y_history;
-    x_history.reserve(num_sim_steps);
-    u_history.reserve(num_sim_steps);
-    y_history.reserve(num_sim_steps);
-
     std::ofstream log(log_path.c_str());
     if (!log) {
       std::cerr << "Could not open log: " << log_path << "\n";
@@ -143,6 +189,13 @@ int main(int argc, char** argv)
     log << std::scientific;
 
     float arcLength = kInitArcLength;
+
+    cv::Mat base_frame = cv::Mat::zeros(800, 800, CV_8UC3);
+    // prepare the base frame with the static elements
+    draw_centerline(base_frame, path);
+    cv::VideoWriter video(video_path, 
+                      cv::VideoWriter::fourcc('M','P','4','V'), 
+                      static_cast<int>(1.0F/kDt), base_frame.size());
 
     for (size_t k = 0; k < num_sim_steps; ++k) {
       const std::vector<mppi::path::PathReferenceSample> ref = ref_gen.generate(path, arcLength, kRefHorizon);
@@ -156,6 +209,13 @@ int main(int argc, char** argv)
       
       Mppi::control_trajectory u_opt = controller.getControlSeq();
 
+      /* Video frame generation */
+      const auto state_trajectory = controller.getActualStateSeq();
+      auto frame = base_frame.clone();
+      draw_reference_path(frame, ref);
+      draw_trajectory(frame, state_trajectory);
+      video.write(frame);
+
       DYN::state_array x_next = model.getZeroState();
       DYN::state_array xdot = model.getZeroState();
       DYN::output_array y = DYN::output_array::Zero();
@@ -167,10 +227,6 @@ int main(int argc, char** argv)
 
       const mppi::path::PathProjection proj = mppi::path::projectPoseOntoPath(path, x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_X)), x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_Y)), arcLength);
       arcLength = proj.arc_length_s;
-
-      x_history.push_back(x);
-      u_history.push_back(u_opt.col(0));
-      y_history.push_back(y);
 
       const mppi::path::PathReferenceSample& r0 = ref.front();
       const float t_end = static_cast<float>(k + 1) * kDt;
