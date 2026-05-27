@@ -129,7 +129,7 @@ int main(int argc, char** argv)
   // PathTrackingCost has a large device params blob; the combined rollout kernel mis-aligns
   // shared memory (illegal memory access). Use split kernels for the optimization itself.
   controller.setKernelChoice(kernelType::USE_SPLIT_KERNELS);
-  model.GPUSetup();
+  model.GPUSetup();12
   cost.GPUSetup();
 
   DYN::state_array x = model.getZeroState();
@@ -142,6 +142,27 @@ int main(int argc, char** argv)
   x(static_cast<int>(DubinsBicycleParams::StateIndex::YAW)) = p0.yaw;
   x(static_cast<int>(DubinsBicycleParams::StateIndex::VEL_X)) = kTargetSpeed;
 
+  // ===========================================================================
+  // A sim-loop is:
+  //   (1) find the current reference from the current state
+  //   (2) find a control using MPPI
+  //   (3) update the state
+  //   (4) repeat
+  //
+  // This file is NOT a sim-loop. It contains a fragment of one would-be
+  // iteration of (1) and (2), then stops. Step (3) and the loop in (4) are
+  // absent on purpose: this file exists to dump a single MPPI optimization
+  // for plotting/diagnostics, not to drive the vehicle along the path. The
+  // closed-loop equivalent lives in
+  // examples/dubins_stadium_path_tracking_example.cu.
+  // ===========================================================================
+
+  // (1) Reference from current state.
+  //     NOTE: this is a degenerate version of "from the current state" - the
+  //     arc-length anchor is the constant kInitArcLength rather than a
+  //     projectPoseOntoPath(x) result. That's fine for a single iteration
+  //     because x is itself constructed at kInitArcLength just above, but it
+  //     would be wrong inside a real sim-loop where x has moved.
   const std::vector<mppi::path::PathReferenceSample> ref = ref_gen.generate(path, kInitArcLength, kRefHorizon);
   mppi::path::fillCostFromPathReference<kRefHorizon>(cost_params, ref, &path, &dyn);
   cost.setParams(cost_params);
@@ -152,10 +173,28 @@ int main(int argc, char** argv)
             << " m  init_s=" << kInitArcLength << " m  v=" << kTargetSpeed << " m/s  rollouts=" << kNumRollouts
             << "  horizon=" << kMppiHorizon << "  lambda=" << kLambda << "\n";
 
-  // Run a single MPPI optimization iteration. The split rollout kernel computes cost(rollout_i)
-  // on the GPU; the optimal control sequence ends up in controller.getControlSeq().
+  // (2) Control from MPPI.
+  //     Run a single MPPI optimization iteration. The split rollout kernel
+  //     computes cost(rollout_i) on the GPU; the optimal control sequence
+  //     ends up in controller.getControlSeq() (read much later, at line ~248).
   controller.computeControl(x, 1);
 
+  // (3) State update: NOT PRESENT.
+  //     A sim-loop iteration would do (matching the for-loop body in
+  //     dubins_stadium_path_tracking_example.cu):
+  //       Mppi::control_trajectory u_opt = controller.getControlSeq();
+  //       model.enforceConstraints(x, u_opt.col(0));
+  //       model.step(x, x_next, xdot, u_opt.col(0), y, k, kDt);
+  //       x = x_next;
+  //       controller.slideControlSequence(1);
+  //     None of that happens here.
+  //
+  // (4) Repeat: NOT PRESENT.
+  //     There is no enclosing loop. Everything below is analysis of the one
+  //     MPPI optimization above, not subsequent sim-loop iterations.
+  // ===========================================================================
+
+  // ---------- ANALYSIS-ONLY (none of this appears in a sim-loop) ----------
   // After computeControl, trajectory_costs_d_ has been transformed in place by the norm-exp
   // kernel, so getSampledCostSeq() returns the unnormalized weights w_i = exp(-(c_i-base)/lam).
   // Recover raw costs as c_i = base - lam * log(w_i). The GPU already included the IS likelihood
@@ -217,6 +256,11 @@ int main(int argc, char** argv)
     }
   }
 
+  // Read the optimal control sequence produced by step (2) above. In a real
+  // sim-loop this is read immediately as `u_opt.col(0)` and applied via
+  // model.step (which is what step (3), the missing state update, would do).
+  // Here it's deferred until now only so the analysis CSV writers below can
+  // dump the full horizon u_opt for plotting.
   const Mppi::control_trajectory u_opt = controller.getControlSeq();
 
   mppi::rollout_csv::writeMeta<DYN>(prefix + "_meta.csv", x, kDt, kLambda, kMppiHorizon, kNumRollouts, num_logged,

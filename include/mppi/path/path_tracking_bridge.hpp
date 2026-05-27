@@ -88,7 +88,7 @@ inline void fillNominalControlFromReference(ControlTrajectory& u_seq,
                                             const Eigen::Matrix<float, DubinsBicycle::STATE_DIM, 1>& x,
                                             const std::vector<PathReferenceSample>& ref, const DubinsBicycleParams& dyn,
                                             const float dt, const Path2D* path = nullptr,
-                                            const float k_lat_steer = 0.5F, const float k_heading_steer = 1.5F)
+                                            const float k_lat_steer = 1.5F, const float k_heading_steer = 0.5F)
 {
   using S = DubinsBicycleParams::StateIndex;
   using C = DubinsBicycleParams::ControlIndex;
