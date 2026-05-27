@@ -33,7 +33,7 @@ namespace
   constexpr int kNumRollouts = 4*1024;
   constexpr float kTargetSpeed = 2.5F;
   constexpr float kVMax = 3.0F;
-  constexpr size_t kSimLaps = 2.5F;
+  constexpr float kSimLaps = 2.5F;
   
   constexpr float kStraightLength = 40.0F;
   constexpr float kTurnRadius = 10.0F;
@@ -45,12 +45,12 @@ namespace
   constexpr float kInitArcLength = kStraightLength - 2.0F;
   constexpr float kInitLateralOffset = 0.1F;
   
-  // Match the closed-loop stadium tracking example so this analysis reflects the same controller.
+  // Zero lateral/heading nominal feedback; curvature feedforward only in u_nom (see fillNominalControlFromReference).
   constexpr float kNoiseStdAccel = 0.15F;
   constexpr float kNoiseStdSteer = 0.12F;
   constexpr float kNomLatSteerGain = 0.0F;
   constexpr float kNomHeadingSteerGain = 0.0F;
-  constexpr float kLambda = 30.0F;
+  constexpr float kLambda = 3000.0F;
   
   using DYN = DubinsBicycle;
   using COST = PathTrackingCost<kRefHorizon>;
@@ -70,7 +70,7 @@ int main(int argc, char** argv)
     std::string log_path = "dubins_stadium_path_tracking_log.csv";
 
     const mppi::path::Path2D path = mppi::path::Path2D::stadium(kStraightLength, kTurnRadius, kSamplesPerArc);
-    const size_t num_sim_steps = simStepsForLaps(path, kSimLaps);
+    const int kSimSteps = simStepsForLaps(path, kSimLaps);
     mppi::rollout_csv::writeCenterlineForLog(path, log_path);
 
     mppi::path::PathReferenceGenerator ref_gen(kDt);
@@ -87,8 +87,8 @@ int main(int argc, char** argv)
     COST cost;
     PathTrackingCostParams<kRefHorizon> cost_params;
     // Order: w_pos, w_heading_so2, w_vel, w_lat_accel, w_lat_jerk, w_steer_dot, w_accel, w_steer.
-    // These match the closed-loop dubins_stadium_path_tracking_example defaults.
-    mppi::path::fillPathTrackingCostWeights<kRefHorizon>(cost_params, 2.0F, 1.0F, 5.0F, 5.0F, 20.0F, 50.0F, 5.0F, 0.5F);
+    // Light comfort (like dubins_circle_path_tracking_example); heavy w_steer_dot blocks steering without nom gains.
+    mppi::path::fillPathTrackingCostWeights<kRefHorizon>(cost_params, 20.0F, 3.0F, 5.0F, 1.0F, 0.05F, 0.0F, 0.05F, 0.05F);
     mppi::path::fillPathTrackingBicycleGeometry<kRefHorizon>(cost_params, dyn);
     cost.setParams(cost_params);
 
@@ -125,13 +125,15 @@ int main(int argc, char** argv)
     x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_Y)) = init_y;
     x(static_cast<int>(DubinsBicycleParams::StateIndex::YAW)) = p0.yaw;
     x(static_cast<int>(DubinsBicycleParams::StateIndex::VEL_X)) = kTargetSpeed;
+    x(static_cast<int>(DubinsBicycleParams::StateIndex::STEER_ANGLE)) =
+        std::atan(dyn.wheel_base * path.curvatureAt(kInitArcLength));
 
     std::vector<DYN::state_array> x_history;
     std::vector<DYN::control_array> u_history;
     std::vector<DYN::output_array> y_history;
-    x_history.reserve(num_sim_steps);
-    u_history.reserve(num_sim_steps);
-    y_history.reserve(num_sim_steps);
+    x_history.reserve(kSimSteps);
+    u_history.reserve(kSimSteps);
+    y_history.reserve(kSimSteps);
 
     std::ofstream log(log_path.c_str());
     if (!log) {
@@ -144,8 +146,15 @@ int main(int argc, char** argv)
 
     float arcLength = kInitArcLength;
 
-    for (size_t k = 0; k < num_sim_steps; ++k) {
-      const std::vector<mppi::path::PathReferenceSample> ref = ref_gen.generate(path, arcLength, kRefHorizon);
+    for (size_t k = 0; k < static_cast<size_t>(kSimSteps); ++k) {
+      const float px = x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_X));
+      const float py = x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_Y));
+      const mppi::path::PathProjection proj_pre =
+          mppi::path::projectPoseOntoPath(path, px, py, arcLength);
+      arcLength = proj_pre.arc_length_s;
+      const float along_v = mppi::path::alongPathSpeedFromState(path, arcLength, x, &proj_pre.signed_lateral_error);
+      const std::vector<mppi::path::PathReferenceSample> ref =
+          ref_gen.generate(path, arcLength, kRefHorizon, along_v);
       mppi::path::fillCostFromPathReference<kRefHorizon>(cost_params, ref, &path, &dyn);
       cost.setParams(cost_params);
       mppi::path::fillNominalControlFromReference(u_nom, x, ref, dyn, kDt, &path, kNomLatSteerGain, kNomHeadingSteerGain);
@@ -164,6 +173,7 @@ int main(int argc, char** argv)
       model.step(x, x_next, xdot, u_opt.col(0), y, static_cast<float>(k), kDt);
 
       x = x_next;
+      controller.slideControlSequence(1);
 
       const mppi::path::PathProjection proj = mppi::path::projectPoseOntoPath(path, x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_X)), x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_Y)), arcLength);
       arcLength = proj.arc_length_s;
@@ -172,7 +182,7 @@ int main(int argc, char** argv)
       u_history.push_back(u_opt.col(0));
       y_history.push_back(y);
 
-      const mppi::path::PathReferenceSample& r0 = ref.front();
+      const mppi::path::Pose2D ref_at_s = path.poseAt(proj.arc_length_s);
       const float t_end = static_cast<float>(k + 1) * kDt;
       log << t_end << ","
           << x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_X)) << ","
@@ -184,7 +194,8 @@ int main(int argc, char** argv)
           << u_opt.col(0)(static_cast<int>(DubinsBicycleParams::ControlIndex::STEER)) << ","
           << u_nom_step(static_cast<int>(DubinsBicycleParams::ControlIndex::ACCEL)) << ","
           << u_nom_step(static_cast<int>(DubinsBicycleParams::ControlIndex::STEER)) << ","
-          << r0.x << "," << r0.y << "," << r0.yaw << "," << r0.v << ","
+          << ref_at_s.x << "," << ref_at_s.y << "," << ref_at_s.yaw << ","
+          << ref_gen.speedAt(path, proj.arc_length_s) << ","
           << proj.arc_length_s << "," << proj.signed_lateral_error << ","
           << static_cast<float>(controller.getBaselineCost()) << "\n";
     }

@@ -5,6 +5,7 @@
 
 #include <mppi/cost_functions/path_tracking/path_tracking_cost.cuh>
 #include <mppi/path/path2d.hpp>
+#include <mppi/path/path_projection.hpp>
 #include <mppi/path/path_reference_generator.hpp>
 #include <mppi/utils/angle_utils.cuh>
 
@@ -63,6 +64,53 @@ inline void fillCostFromPathReference(PathTrackingCostParams<REF_HORIZON>& cost_
     cost_params.s_goal[base + static_cast<int>(O::STEER_ANGLE)] = steer_ref;
   }
   cost_params.setCurrentTime(0);
+}
+
+/**
+ * Effective arc-length rate ds/dt for reference generation when the pose is off the path.
+ * Uses v * cos(heading_err), scaled by orbit radius for circles (R/rho) or 1/(1 - e*kappa) elsewhere.
+ * @param signed_lateral_error  PathProjection::signed_lateral_error; if nullptr, computed via projection.
+ */
+inline float alongPathSpeedFromState(const Path2D& path, const float s,
+                                     const Eigen::Matrix<float, DubinsBicycle::STATE_DIM, 1>& x,
+                                     const float* signed_lateral_error = nullptr)
+{
+  const float px = x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_X));
+  const float py = x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_Y));
+  const Pose2D p = path.poseAt(s);
+  const float heading_err =
+      angle_utils::shortestAngularDistance(x(static_cast<int>(DubinsBicycleParams::StateIndex::YAW)), p.yaw);
+  const float v = x(static_cast<int>(DubinsBicycleParams::StateIndex::VEL_X));
+  const float v_tangent = std::max(0.0F, v * std::cos(heading_err));
+
+  float e = 0.0F;
+  if (signed_lateral_error != nullptr)
+  {
+    e = *signed_lateral_error;
+  }
+  else
+  {
+    const PathProjection proj = projectPoseOntoPath(path, px, py, s);
+    e = proj.signed_lateral_error;
+  }
+
+  if (path.isAnalyticCircle())
+  {
+    const CircleGeometry& c = path.circleGeometry();
+    const float dx = px - c.center_x;
+    const float dy = py - c.center_y;
+    const float rho = std::sqrt(dx * dx + dy * dy);
+    const float rho_min = std::max(c.radius * 0.1F, 1.0E-3F);
+    return v_tangent * c.radius / std::max(rho, rho_min);
+  }
+
+  const float kappa = path.curvatureAt(s);
+  if (std::fabs(kappa) > 1.0E-5F)
+  {
+    const float denom = 1.0F - e * kappa;
+    return v_tangent / std::max(0.1F, denom);
+  }
+  return v_tangent;
 }
 
 /** Lateral offset along the path left-normal from poseAt(s). */

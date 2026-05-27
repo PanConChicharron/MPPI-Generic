@@ -1,9 +1,9 @@
 /**
- * Dubins bicycle + MPPI tracking on a closed stadium (racetrack) path.
+ * Dubins bicycle + MPPI tracking on a closed circular path.
  *
- * Build: cmake --build build --target dubins_stadium_path_tracking_example
- * Run:   ./build/examples/dubins_stadium_path_tracking_example [--straight 40] [--radius 10] [log.csv]
- * Plot:  python3 examples/plot_racer_dubins_temporal_mppi.py dubins_stadium_path_tracking_log.csv
+ * Build: cmake --build build --target dubins_circle_path_tracking_example
+ * Run:   ./build/examples/dubins_circle_path_tracking_example [log.csv]
+ * Plot:  python3 examples/plot_racer_dubins_temporal_mppi.py dubins_circle_path_tracking_log.csv
  */
  #include "mppi_rollout_csv.hpp"
 
@@ -30,7 +30,7 @@
    constexpr int kMppiHorizon = 50;
    constexpr int kRefHorizon = kMppiHorizon + 8;
    constexpr float kDt = 0.1F;
-   constexpr int kNumRollouts = 4*1024;
+   constexpr int kNumRollouts = 32*1024;
    constexpr float kTargetSpeed = 2.5F;
    constexpr float kVMax = 3.0F;
    constexpr float kSimLaps = 2.5F;
@@ -42,18 +42,15 @@
    constexpr float kCircleTheta0 = 0.0F;/** Plot/export polyline density only; tracking uses exact circle geometry. */
    constexpr int kCirclePlotSamples = 512;
    
-   // s = kStraightLength is exactly the right-turn corner entry of the stadium. Start 2 m before it
-   // so MPPI sees the curvature step around step 8 of the horizon - the bend lives in the middle of
-   // the prediction window where the rollouts have spread enough to be informative.
    constexpr float kInitArcLength = 0.0F;
    constexpr float kInitLateralOffset = 0.1F;
    
-   // Match the closed-loop stadium tracking example so this analysis reflects the same controller.
+   // Zero lateral/heading nominal feedback; curvature feedforward only in u_nom (see fillNominalControlFromReference).
    constexpr float kNoiseStdAccel = 0.15F;
    constexpr float kNoiseStdSteer = 0.12F;
-   constexpr float kNomLatSteerGain = 0.5F;
-   constexpr float kNomHeadingSteerGain = 0.5F;
-   constexpr float kLambda = 3000.0F;
+   constexpr float kNomLatSteerGain = 0.0F;
+   constexpr float kNomHeadingSteerGain = 0.0F;
+   constexpr float kLambda = 100.0F;
    
    using DYN = DubinsBicycle;
    using COST = PathTrackingCost<kRefHorizon>;
@@ -90,8 +87,8 @@
      COST cost;
      PathTrackingCostParams<kRefHorizon> cost_params;
      // Order: w_pos, w_heading_so2, w_vel, w_lat_accel, w_lat_jerk, w_steer_dot, w_accel, w_steer.
-     // These match the closed-loop dubins_stadium_path_tracking_example defaults.
-     mppi::path::fillPathTrackingCostWeights<kRefHorizon>(cost_params, 5.0F, 1.0F, 5.0F, 5.0F, 10.0F, 10.0F, 5.0F, 0.5F);
+     // Light comfort (like dubins_path_tracking_example); heavy w_steer_dot blocks steering without nom gains.
+     mppi::path::fillPathTrackingCostWeights<kRefHorizon>(cost_params, 20.0F, 3.0F, 5.0F, 1.0F, 0.05F, 0.0F, 0.05F, 0.05F);
      mppi::path::fillPathTrackingBicycleGeometry<kRefHorizon>(cost_params, dyn);
      cost.setParams(cost_params);
  
@@ -128,6 +125,8 @@
      x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_Y)) = init_y;
      x(static_cast<int>(DubinsBicycleParams::StateIndex::YAW)) = p0.yaw;
      x(static_cast<int>(DubinsBicycleParams::StateIndex::VEL_X)) = kTargetSpeed;
+     x(static_cast<int>(DubinsBicycleParams::StateIndex::STEER_ANGLE)) =
+         std::atan(dyn.wheel_base / kCircleRadius);
  
      std::vector<DYN::state_array> x_history;
      std::vector<DYN::control_array> u_history;
@@ -148,7 +147,14 @@
     float arcLength = kInitArcLength;
  
      for (size_t k = 0; k < kSimSteps; ++k) {
-       const std::vector<mppi::path::PathReferenceSample> ref = ref_gen.generate(path, arcLength, kRefHorizon);
+       const float px = x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_X));
+       const float py = x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_Y));
+       const mppi::path::PathProjection proj_pre =
+           mppi::path::projectPoseOntoPath(path, px, py, arcLength);
+       arcLength = proj_pre.arc_length_s;
+       const float along_v = mppi::path::alongPathSpeedFromState(path, arcLength, x, &proj_pre.signed_lateral_error);
+       const std::vector<mppi::path::PathReferenceSample> ref =
+           ref_gen.generate(path, arcLength, kRefHorizon, along_v);
        mppi::path::fillCostFromPathReference<kRefHorizon>(cost_params, ref, &path, &dyn);
        cost.setParams(cost_params);
       mppi::path::fillNominalControlFromReference(u_nom, x, ref, dyn, kDt, &path, kNomLatSteerGain, kNomHeadingSteerGain);
@@ -167,7 +173,8 @@
        model.step(x, x_next, xdot, u_opt.col(0), y, static_cast<float>(k), kDt);
  
        x = x_next;
- 
+       controller.slideControlSequence(1);
+
        const mppi::path::PathProjection proj = mppi::path::projectPoseOntoPath(path, x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_X)), x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_Y)), arcLength);
 
        arcLength = proj.arc_length_s;
@@ -176,7 +183,7 @@
        u_history.push_back(u_opt.col(0));
        y_history.push_back(y);
  
-      const mppi::path::PathReferenceSample& r0 = ref.front();
+      const mppi::path::Pose2D ref_at_s = path.poseAt(proj.arc_length_s);
       const float t_end = static_cast<float>(k + 1) * kDt;
       log << t_end << ","
           << x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_X)) << ","
@@ -188,7 +195,8 @@
           << u_opt.col(0)(static_cast<int>(DubinsBicycleParams::ControlIndex::STEER)) << ","
           << u_nom_step(static_cast<int>(DubinsBicycleParams::ControlIndex::ACCEL)) << ","
           << u_nom_step(static_cast<int>(DubinsBicycleParams::ControlIndex::STEER)) << ","
-          << r0.x << "," << r0.y << "," << r0.yaw << "," << r0.v << ","
+          << ref_at_s.x << "," << ref_at_s.y << "," << ref_at_s.yaw << ","
+          << ref_gen.speedAt(path, proj.arc_length_s) << ","
           << proj.arc_length_s << "," << proj.signed_lateral_error << ","
           << static_cast<float>(controller.getBaselineCost()) << "\n";
      }

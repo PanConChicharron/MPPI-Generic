@@ -69,8 +69,13 @@ public:
   /**
    * Build reference samples at t = 0, dt, 2*dt, ... (count-1)*dt along the path forward from start_s.
    * @param count  Number of samples (e.g. MPPI horizon + 1)
+   * @param along_path_speed  If >= 0, cap the arc-length advance rate to this value (m/s). Use
+   *        alongPathSpeedFromState() (heading projection plus R/rho or 1/(1-e*kappa) scaling) so the
+   *        horizon does not race ahead when the pose is off the path. Sample r.v still uses speedAt(s).
+   *        Pass a negative value to advance at speedAt(s) only (legacy behavior).
    */
-  std::vector<PathReferenceSample> generate(const Path2D& path, const float start_s, const int count) const
+  std::vector<PathReferenceSample> generate(const Path2D& path, const float start_s, const int count,
+                                            const float along_path_speed = -1.0F) const
   {
     std::vector<PathReferenceSample> out;
     if (count <= 0 || path.empty())
@@ -103,8 +108,12 @@ public:
       }
       if (k + 1 < count)
       {
-        const float v_mid = r.v;
-        float s_next = s + v_mid * dt_;
+        float v_advance = r.v;
+        if (along_path_speed >= 0.0F)
+        {
+          v_advance = std::min(r.v, along_path_speed);
+        }
+        float s_next = s + v_advance * dt_;
         if (path.closed())
         {
           s = path.wrapArcLength(s_next);
