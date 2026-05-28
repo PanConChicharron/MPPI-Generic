@@ -31,9 +31,7 @@ namespace
   constexpr float kInitArcLength = kStraightLength - 2.0F;
   constexpr float kInitLateralOffset = 0.1F;
   
-  constexpr float kNoiseStdThrottle = 0.2F;
-  constexpr float kNoiseStdSteer = 0.15F;
-  constexpr float kLambda = 10.0F;
+  constexpr float kLambda = 100.0F;
 
   struct RacerCostParams : public ::CostParams<2>
   {
@@ -97,14 +95,43 @@ namespace
         float crash_cost = 0;
         if (track_val >= this->params_.boundary_threshold) {
             crash_cost = this->params_.crash_coeff;
-            *crash_status = 1;
+            // *crash_status = 1;
         }
 
         return speed_cost + track_cost + crash_cost;
     }
 
+    cv::Mat cpu_costmap_;
+    void setCpuCostmap(const cv::Mat& costmap) { cpu_costmap_ = costmap; }
+
     float computeStateCost(const Eigen::Ref<const output_array> y, int timestep, int* crash_status) {
-        return 0.0f;
+        if (cpu_costmap_.empty()) return 0.0f;
+
+        float x = y[static_cast<int>(RacerDubinsParams::OutputIndex::BASELINK_POS_I_X)];
+        float y_pos = y[static_cast<int>(RacerDubinsParams::OutputIndex::BASELINK_POS_I_Y)];
+        float vel = y[static_cast<int>(RacerDubinsParams::OutputIndex::TOTAL_VELOCITY)];
+
+        float u, v, w;
+        coorTransform(x, y_pos, &u, &v, &w);
+        
+        float norm_u = u / w;
+        float norm_v = v / w;
+
+        int pixel_u = std::max(0, std::min(static_cast<int>(norm_u * cpu_costmap_.cols), cpu_costmap_.cols - 1));
+        int pixel_v = std::max(0, std::min(static_cast<int>(norm_v * cpu_costmap_.rows), cpu_costmap_.rows - 1));
+        
+        float track_val = cpu_costmap_.at<float>(pixel_v, pixel_u);
+
+        float vel_diff = vel - this->params_.desired_speed;
+        float speed_cost = this->params_.speed_coeff * (vel_diff * vel_diff);
+        float track_cost = this->params_.track_coeff * track_val;
+        float crash_cost = 0;
+        if (track_val >= this->params_.boundary_threshold) {
+            crash_cost = this->params_.crash_coeff;
+            // *crash_status = 1;
+        }
+
+        return speed_cost + track_cost + crash_cost;
     }
 
     __device__ float terminalCost(float* y, float* theta_c) {
@@ -285,12 +312,14 @@ int main(int argc, char** argv)
         cv::line(costmap_img, worldToMap(anchors[i].x, anchors[i].y), 
                  worldToMap(anchors[i+1].x, anchors[i+1].y), cv::Scalar(0.0), 40);
     }
+
+    cv::GaussianBlur(costmap_img, costmap_img, cv::Size(21, 21), 5.0);
     
     // Add obstacles
     std::mt19937 gen(42);
     std::uniform_real_distribution<float> dist_s(0, path.length());
-    std::uniform_real_distribution<float> dist_side(-1.0, 1.0);
-    std::uniform_real_distribution<float> dist_r(1.5, 3.0);
+    std::uniform_real_distribution<float> dist_side(-1.0, 2.0);
+    std::uniform_real_distribution<float> dist_r(2.0, 2.5);
     
     for (int i = 0; i < 15; ++i) {
         float s = dist_s(gen);
@@ -304,8 +333,10 @@ int main(int argc, char** argv)
         cv::circle(costmap_img, worldToMap(ox, oy), r * ppm, cv::Scalar(1.0), -1);
     }
     
-    // Blur to create gradient
-    cv::GaussianBlur(costmap_img, costmap_img, cv::Size(21, 21), 5.0);
+    cv::GaussianBlur(costmap_img, costmap_img, cv::Size(5, 5), 1.0);
+    
+    // Save the costmap to an image file
+    cv::imwrite("costmap.png", costmap_img * 255.0);
     
     std::vector<float4> host_data(width * height);
     for (int i = 0; i < height; ++i) {
@@ -317,6 +348,7 @@ int main(int argc, char** argv)
     COST cost;
     cost.GPUSetup();
     cost.costmapToTexture(width, height, host_data.data());
+    cost.setCpuCostmap(costmap_img);
     
     RacerCostParams cost_params;
     cost_params.r_c1 = make_float3(1.0f / (x_max - x_min), 0, 0);
@@ -341,8 +373,8 @@ int main(int argc, char** argv)
 
     /* Sampling parameters */
     SAMPLER::SAMPLING_PARAMS_T sp{};
-    sp.std_dev[static_cast<int>(RacerDubinsParams::ControlIndex::THROTTLE_BRAKE)] = kNoiseStdThrottle;
-    sp.std_dev[static_cast<int>(RacerDubinsParams::ControlIndex::STEER_CMD)] = kNoiseStdSteer;
+    sp.std_dev[static_cast<int>(RacerDubinsParams::ControlIndex::THROTTLE_BRAKE)] = 0.2F;
+    sp.std_dev[static_cast<int>(RacerDubinsParams::ControlIndex::STEER_CMD)] = 0.6F;
     sp.sum_strides = std::max(32, (kNumRollouts + 1023) / 1024);
     SAMPLER sampler(sp);
 
@@ -353,7 +385,7 @@ int main(int argc, char** argv)
       auto cp = controller.getParams();
       cp.dynamics_rollout_dim_ = dim3(32, 2, 1);
       cp.cost_rollout_dim_ = dim3(32, 2, 1);
-      cp.seed_ = 42U;
+      cp.seed_ = 1U;
       controller.setParams(cp);
       controller.setPercentageSampledControlTrajectories(0.1F);
     }
@@ -388,6 +420,7 @@ int main(int argc, char** argv)
                       static_cast<int>(1.0F/kDt), base_frame.size());
 
     cv::namedWindow("MPPI Tracking", cv::WINDOW_NORMAL);
+    cv::resizeWindow("MPPI Tracking", base_frame.cols, base_frame.rows);
 
     for (size_t k = 0; k < num_sim_steps; ++k) {
       const std::vector<mppi::path::PathReferenceSample> ref = ref_gen.generate(path, arcLength, kRefHorizon);
@@ -397,13 +430,16 @@ int main(int argc, char** argv)
 
       controller.computeControl(x, 1);
       cudaStreamSynchronize(controller.stream_);
+      controller.calculateSampledStateTrajectories();
       
       Mppi::control_trajectory u_opt = controller.getControlSeq();
 
       /* Video frame generation */
       const auto state_trajectory = controller.getActualStateSeq();
+      const auto sampled_trajectories = controller.getSampledOutputTrajectories();
       auto frame = base_frame.clone();
       draw_reference_path(frame, ref);
+      draw_sampled_trajectories(frame, sampled_trajectories);
       draw_trajectory(frame, state_trajectory);
       video.write(frame);
 
