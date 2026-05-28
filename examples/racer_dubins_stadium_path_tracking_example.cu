@@ -273,8 +273,8 @@ namespace
   {
     if (sampled_trajectories.empty()) return;
     cv::Mat overlay = img.clone();
-    const int x_idx = static_cast<int>(RacerDubinsParams::OutputIndex::BASELINK_POS_I_X);
-    const int y_idx = static_cast<int>(RacerDubinsParams::OutputIndex::BASELINK_POS_I_Y);
+    const int x_idx = static_cast<int>(RacerDubinsParams::StateIndex::POS_X);
+    const int y_idx = static_cast<int>(RacerDubinsParams::StateIndex::POS_Y);
     for (const auto& traj : sampled_trajectories)
     {
       for (int i = 0; i + 1 < traj.cols(); ++i)
@@ -290,6 +290,11 @@ namespace
 
 int main(int argc, char** argv)
 {
+    unsigned int seed = 42;
+    if (argc > 1) {
+        seed = std::stoul(argv[1]);
+    }
+    std::cout << "Using random seed: " << seed << std::endl;
     std::string video_path = "racer_dubins_stadium_path_tracking.mp4";
 
     /* Environment */
@@ -316,7 +321,9 @@ int main(int argc, char** argv)
     cv::GaussianBlur(costmap_img, costmap_img, cv::Size(21, 21), 5.0);
     
     // Add obstacles
-    std::mt19937 gen(42);
+    struct Obstacle { float ox; float oy; float r; };
+    std::vector<Obstacle> obstacles;
+    std::mt19937 gen(seed);
     std::uniform_real_distribution<float> dist_s(0, path.length());
     std::uniform_real_distribution<float> dist_side(-1.0, 2.0);
     std::uniform_real_distribution<float> dist_r(2.0, 2.5);
@@ -328,9 +335,12 @@ int main(int argc, char** argv)
         auto p = path.poseAt(s);
         float tx, ty;
         path.tangentAt(s, tx, ty);
-        float ox = p.x - side * ty;
-        float oy = p.y + side * tx;
-        cv::circle(costmap_img, worldToMap(ox, oy), r * ppm, cv::Scalar(1.0), -1);
+        obstacles.push_back({p.x - side * ty, p.y + side * tx, r});
+    }
+
+    // Draw obstacles on costmap
+    for (const auto& obs : obstacles) {
+        cv::circle(costmap_img, worldToMap(obs.ox, obs.oy), obs.r * ppm, cv::Scalar(1.0), -1);
     }
     
     cv::GaussianBlur(costmap_img, costmap_img, cv::Size(5, 5), 1.0);
@@ -387,7 +397,7 @@ int main(int argc, char** argv)
       cp.cost_rollout_dim_ = dim3(32, 2, 1);
       cp.seed_ = 1U;
       controller.setParams(cp);
-      controller.setPercentageSampledControlTrajectories(0.1F);
+      controller.setPercentageSampledControlTrajectories(0.01F);
     }
     model.GPUSetup();
 
@@ -403,16 +413,8 @@ int main(int argc, char** argv)
     cv::Mat base_frame = cv::Mat::zeros(1024, 1024, CV_8UC3);
     draw_centerline(base_frame, path);
     // Draw obstacles on base frame for visualization
-    for (int i = 0; i < 15; ++i) {
-        float s = dist_s(gen);
-        float side = (dist_side(gen) > 0 ? 1.0 : -1.0) * 2.5; 
-        float r = dist_r(gen);
-        auto p = path.poseAt(s);
-        float tx, ty;
-        path.tangentAt(s, tx, ty);
-        float ox = p.x - side * ty;
-        float oy = p.y + side * tx;
-        cv::circle(base_frame, worldToPixel(ox, oy, 1024, 1024), r * 15.0f, cv::Scalar(0, 0, 255), -1);
+    for (const auto& obs : obstacles) {
+        cv::circle(base_frame, worldToPixel(obs.ox, obs.oy, 1024, 1024), obs.r * 15.0f, cv::Scalar(0, 0, 255), -1);
     }
 
     cv::VideoWriter video(video_path, 
@@ -424,8 +426,6 @@ int main(int argc, char** argv)
 
     for (size_t k = 0; k < num_sim_steps; ++k) {
       const std::vector<mppi::path::PathReferenceSample> ref = ref_gen.generate(path, arcLength, kRefHorizon);
-      // We don't use fillNominalControlFromReference as it is for DubinsBicycle.
-      // We let MPPI find the control from zero nominal or random exploration.
       controller.updateImportanceSampler(u_nom);
 
       controller.computeControl(x, 1);
