@@ -4,7 +4,10 @@
  * Build: cmake --build build --target dubins_stadium_path_tracking_example
  * Run:   ./build/examples/dubins_stadium_path_tracking_example [--straight 40] [--radius 10] [log.csv]
  * Plot:  python3 examples/plot_racer_dubins_temporal_mppi.py dubins_stadium_path_tracking_log.csv
+ *        python3 examples/plot_deviation_mppi_rollouts.py dubins_stadium_path_tracking_log.csv
+ * Tune:  python3 examples/mppi_tune_ui.py dubins_stadium_path_tracking_log.csv
  */
+#include "mppi_rollout_analysis_dump.hpp"
 #include "mppi_rollout_csv.hpp"
 
 #include <mppi/controllers/MPPI/mppi_controller.cuh>
@@ -23,6 +26,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <sstream>
 #include <string>
 
 namespace
@@ -50,7 +54,7 @@ namespace
   constexpr float kNoiseStdSteer = 0.12F;
   constexpr float kNomLatSteerGain = 0.0F;
   constexpr float kNomHeadingSteerGain = 0.0F;
-  constexpr float kLambda = 3000.0F;
+  constexpr float kLambda = 30.0F;
   
   using DYN = DubinsBicycle;
   using COST = PathTrackingCost<kRefHorizon>;
@@ -62,6 +66,30 @@ namespace
   {
     const float lap_time = path.length() / kVMax;
     return static_cast<int>(std::ceil(laps * lap_time / kDt));
+  }
+
+  constexpr float kOffTrackDistanceThresholdM = 5.0F;
+
+  struct TrackDepartureEvent
+  {
+    bool detected = false;
+    float t = -1.0F;
+    int step = -1;
+    float distance_m = 0.0F;
+  };
+
+  std::string joinSemicolon(const std::vector<std::string>& parts)
+  {
+    std::ostringstream oss;
+    for (size_t i = 0; i < parts.size(); ++i)
+    {
+      if (i > 0U)
+      {
+        oss << ';';
+      }
+      oss << parts[i];
+    }
+    return oss.str();
   }
 }  // namespace
 
@@ -145,6 +173,11 @@ int main(int argc, char** argv)
     log << std::scientific;
 
     float arcLength = kInitArcLength;
+    TrackDepartureEvent departure{};
+    bool was_off_track = false;
+    std::vector<std::string> deviation_steps;
+    std::vector<std::string> deviation_times;
+    std::vector<std::string> mppi_analysis_prefixes;
 
     for (size_t k = 0; k < static_cast<size_t>(kSimSteps); ++k) {
       const float px = x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_X));
@@ -152,6 +185,9 @@ int main(int argc, char** argv)
       const mppi::path::PathProjection proj_pre =
           mppi::path::projectPoseOntoPath(path, px, py, arcLength);
       arcLength = proj_pre.arc_length_s;
+      const bool off_track = proj_pre.distance > kOffTrackDistanceThresholdM;
+      const bool entering_off_track = off_track && !was_off_track;
+      was_off_track = off_track;
       const float along_v = mppi::path::alongPathSpeedFromState(path, arcLength, x, &proj_pre.signed_lateral_error);
       const std::vector<mppi::path::PathReferenceSample> ref =
           ref_gen.generate(path, arcLength, kRefHorizon, along_v);
@@ -162,7 +198,28 @@ int main(int argc, char** argv)
       const DYN::control_array u_nom_step = u_nom.col(0);
 
       controller.computeControl(x, 1);
-      
+
+      if (entering_off_track)
+      {
+        const int step_1based = static_cast<int>(k) + 1;
+        const float t_solve = static_cast<float>(k) * kDt;
+        const std::string prefix = mppi::rollout_csv::analysisPrefixForLogStep(log_path, step_1based);
+        mppi::rollout_csv::dumpSingleMppiIteration<DYN, Mppi, SAMPLER, Mppi::control_trajectory,
+                                                   Mppi::output_trajectory>(
+            model, controller, sampler, x, prefix, kDt, kLambda, kMppiHorizon, kNumRollouts, &path, step_1based,
+            t_solve, proj_pre.distance, &ref);
+        deviation_steps.push_back(std::to_string(step_1based));
+        deviation_times.push_back(std::to_string(t_solve));
+        mppi_analysis_prefixes.push_back(prefix);
+        if (!departure.detected)
+        {
+          departure.detected = true;
+          departure.t = t_solve;
+          departure.step = step_1based;
+          departure.distance_m = proj_pre.distance;
+        }
+      }
+
       Mppi::control_trajectory u_opt = controller.getControlSeq();
 
       DYN::state_array x_next = model.getZeroState();
@@ -184,6 +241,7 @@ int main(int argc, char** argv)
 
       const mppi::path::Pose2D ref_at_s = path.poseAt(proj.arc_length_s);
       const float t_end = static_cast<float>(k + 1) * kDt;
+
       log << t_end << ","
           << x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_X)) << ","
           << x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_Y)) << ","
@@ -201,5 +259,31 @@ int main(int argc, char** argv)
     }
 
     log.close();
+
+    std::vector<std::pair<std::string, std::string>> meta_rows{
+        {"track_departure_detected", departure.detected ? "1" : "0"},
+        {"track_departure_distance_threshold_m", std::to_string(kOffTrackDistanceThresholdM)},
+        {"track_departure_steps", joinSemicolon(deviation_steps)},
+        {"track_departure_times", joinSemicolon(deviation_times)},
+        {"mppi_analysis_prefixes", joinSemicolon(mppi_analysis_prefixes)},
+    };
+    if (departure.detected)
+    {
+      meta_rows.emplace_back("track_departure_t", std::to_string(departure.t));
+      meta_rows.emplace_back("track_departure_step", std::to_string(departure.step));
+      meta_rows.emplace_back("track_departure_distance_m", std::to_string(departure.distance_m));
+      std::cout << "Off-track (>" << kOffTrackDistanceThresholdM << " m): " << deviation_steps.size()
+                << " episode(s), first at t=" << departure.t << " s (step " << departure.step << ")\n";
+      std::cout << "MPPI rollout dumps: plot with  python3 examples/plot_deviation_mppi_rollouts.py " << log_path
+                << "\n";
+    }
+    else
+    {
+      meta_rows.emplace_back("track_departure_t", "");
+      meta_rows.emplace_back("track_departure_step", "");
+      std::cout << "Vehicle stayed within " << kOffTrackDistanceThresholdM << " m of path for full run.\n";
+    }
+    mppi::rollout_csv::writeKeyValueMetaForLog(log_path, meta_rows);
+
     return 0;
   }

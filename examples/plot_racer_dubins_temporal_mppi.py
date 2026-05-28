@@ -5,7 +5,8 @@
 # Supported CSV logs (header row required for dubins format; legacy logs still work by column count):
 #   dubins_path_tracking_example.cu         — straight line
 #   dubins_circle_path_tracking_example.cu  — closed circle
-#   Columns: u_accel, u_steer, arc_s, lat_err (+ *_centerline.csv)
+#   Columns: u_accel, u_steer, arc_s, lat_err (+ *_centerline.csv, optional *_meta.csv)
+#   dubins_stadium_path_tracking_example.cu also writes track_departure_* keys to *_meta.csv
 #   Legacy RacerDubins examples (if present) — throttle/steer, optional path_u_*, arc_s
 #
 # Usage:
@@ -50,6 +51,40 @@ def arc_s_from_xy_on_polyline(px: np.ndarray, py: np.ndarray, cpx: np.ndarray, c
                 best_s = s_vert[e] + t * (s_vert[e + 1] - s_vert[e])
         out[i] = best_s % perimeter if perimeter > 0 else 0.0
     return out
+
+
+def load_log_meta(csv_path: Path) -> dict[str, str]:
+    """Load optional <log_stem>_meta.csv (key,value rows)."""
+    meta_path = csv_path.with_name(csv_path.stem + "_meta.csv")
+    if not meta_path.is_file():
+        return {}
+    out: dict[str, str] = {}
+    with meta_path.open(newline="") as f:
+        reader = csv.reader(f)
+        header = next(reader, None)
+        if header is None:
+            return out
+        for row in reader:
+            if len(row) >= 2:
+                out[row[0].strip()] = row[1].strip()
+    return out
+
+
+def track_departure_time_s(meta: dict[str, str]) -> float | None:
+    if meta.get("track_departure_detected", "0") not in ("1", "true", "True"):
+        return None
+    raw = meta.get("track_departure_t", "").strip()
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+def mark_track_departure(ax, t_dep: float, *, label: str | None = None) -> None:
+    lbl = label if label is not None else f"off-track > threshold (t={t_dep:.1f} s)"
+    ax.axvline(t_dep, color="crimson", linewidth=1.4, linestyle="--", alpha=0.85, label=lbl, zorder=5)
 
 
 def display_available() -> bool:
@@ -239,6 +274,19 @@ def main() -> int:
         return 1
 
     log = load_log(args.csv)
+    meta = load_log_meta(args.csv)
+    t_dep = track_departure_time_s(meta)
+    if t_dep is not None:
+        th = meta.get("track_departure_distance_threshold_m", "")
+        step = meta.get("track_departure_step", "")
+        dist_m = meta.get("track_departure_distance_m", "")
+        print(
+            f"off-track (>{th} m): first at t={t_dep:.3g} s  step={step}  dist={dist_m} m",
+            file=sys.stderr,
+        )
+    elif meta:
+        print("note: meta present but no track departure flagged", file=sys.stderr)
+
     t = log["t"]
     px, py, yaw, vx = log["px"], log["py"], log["yaw"], log["vx"]
     steer, brake = log["steer"], log["brake"]
@@ -310,8 +358,8 @@ def main() -> int:
     ax_xy.set_ylabel("y [m]")
     ax_xy.set_title(f"Plan view{title_suffix}")
     ax_xy.grid(True, alpha=0.3)
-    ax_xy.legend(loc="best")
 
+    state_axes: list = []
     for ax, yv, name, c in [
         (fig.add_subplot(gs[1, 0]), px, "pos x [m]", "C0"),
         (fig.add_subplot(gs[1, 1]), py, "pos y [m]", "C0"),
@@ -332,6 +380,7 @@ def main() -> int:
         ax.grid(True, alpha=0.3)
         if name.startswith("pos") or name in ("yaw [rad]", "vel x [m/s]"):
             ax.legend(loc="best", fontsize=7)
+        state_axes.append(ax)
 
     ax_st = fig.add_subplot(gs[3, 0])
     ax_st.plot(t, steer, color="C3", label="steer angle [state]")
@@ -374,6 +423,7 @@ def main() -> int:
     ax_br.set_title("Applied controls (overview)" if has_nom_compare else None)
     ax_br.legend(loc="best", fontsize=6)
     ax_br.grid(True, alpha=0.3)
+    control_axes = [ax_st, ax_br]
 
     row_after_controls = 4
     if has_nom_compare:
@@ -426,8 +476,10 @@ def main() -> int:
         ax_d1.legend(loc="best", fontsize=7)
 
         row_prog = row_diff + 1
+        control_axes.extend([ax_u0, ax_u1, ax_d0, ax_d1])
     else:
         row_prog = row_after_controls
+    progress_axes: list = []
     if arc_s is not None:
         ax_s = fig.add_subplot(gs[row_prog, :])
         ax_s.plot(t, arc_s, color="C6", linewidth=1.2, label="arc s (projected)")
@@ -466,6 +518,7 @@ def main() -> int:
         ax_s.set_title("Progress along path")
         ax_s.legend(loc="best", fontsize=7)
         ax_s.grid(True, alpha=0.3)
+        progress_axes.append(ax_s)
         row_prog += 1
 
     if lat_err is not None:
@@ -477,6 +530,17 @@ def main() -> int:
         ax_lat.set_title("Projection: signed lateral offset from path")
         ax_lat.legend(loc="best", fontsize=7)
         ax_lat.grid(True, alpha=0.3)
+        progress_axes.append(ax_lat)
+
+    ax_xy.legend(loc="best")
+    if t_dep is not None:
+        time_axes = [ax_xy, *state_axes, *control_axes, *progress_axes]
+        for i, ax in enumerate(time_axes):
+            if i == 0:
+                mark_track_departure(ax, t_dep)
+            else:
+                mark_track_departure(ax, t_dep, label=None)
+        ax_xy.legend(loc="best")
 
     fig2, axb = plt.subplots(1, 1, figsize=(10, 3.2), constrained_layout=True)
     if nominal_cost is not None and mppi_applied_cost is not None:
@@ -510,6 +574,8 @@ def main() -> int:
         axb.set_title("MPPI minimum rollout cost (re-run example for nominal/mppi_applied_cost columns)")
     axb.set_ylabel("cost")
     axb.set_xlabel("t [s]")
+    if t_dep is not None:
+        mark_track_departure(axb, t_dep)
     axb.legend(loc="best", fontsize=7)
     axb.grid(True, alpha=0.3)
 

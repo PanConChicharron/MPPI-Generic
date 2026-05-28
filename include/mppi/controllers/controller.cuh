@@ -274,6 +274,11 @@ public:
       trajectory_costs_.resize(NUM_ROLLOUTS);
       trajectory_costs_.setZero();
     }
+    if (last_raw_rollout_costs_.size() != NUM_ROLLOUTS)
+    {
+      last_raw_rollout_costs_.resize(NUM_ROLLOUTS);
+      last_raw_rollout_costs_.setZero();
+    }
     // Call the GPU setup functions of the model, cost, sampling distribution, and feedback controller
     model_->GPUSetup();
     cost_->GPUSetup();
@@ -437,6 +442,12 @@ public:
   virtual sampled_cost_traj getSampledCostSeq() const
   {
     return trajectory_costs_;
+  };
+
+  /** Per-rollout total costs from the last computeControl(), before softmax (norm-exp). */
+  virtual sampled_cost_traj getRawRolloutCosts() const
+  {
+    return last_raw_rollout_costs_;
   };
 
   /**
@@ -975,6 +986,7 @@ protected:
   state_trajectory state_ = state_trajectory::Zero();
   output_trajectory output_ = output_trajectory::Zero();
   sampled_cost_traj trajectory_costs_;
+  sampled_cost_traj last_raw_rollout_costs_;
   std::vector<float2> cost_baseline_and_norm_ = { make_float2(0.0, 0.0) };
   bool CUDA_mem_init_ = false;
 

@@ -193,6 +193,8 @@ void VanillaMPPI::computeControl(const Eigen::Ref<const state_array>& state, int
                                  NUM_ROLLOUTS * sizeof(float), cudaMemcpyDeviceToHost, this->stream_));
     HANDLE_ERROR(cudaStreamSynchronize(this->stream_));
 
+    this->last_raw_rollout_costs_ = this->trajectory_costs_;
+
     this->setBaseline(mppi::kernels::computeBaselineCost(this->trajectory_costs_.data(), NUM_ROLLOUTS));
 
     if (this->getBaselineCost() > baseline_prev + 1)

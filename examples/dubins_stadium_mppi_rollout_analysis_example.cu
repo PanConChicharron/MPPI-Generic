@@ -21,6 +21,7 @@
  * We do still pull noise samples and host-replay the dynamics for each rollout, only because
  * output_d_ is not reliably accessible from the host in this codebase and we need (x, y) for plot.
  */
+#include "mppi_rollout_analysis_dump.hpp"
 #include "mppi_rollout_csv.hpp"
 
 #include <mppi/controllers/MPPI/mppi_controller.cuh>
@@ -33,13 +34,8 @@
 #include <mppi/path/path2d.hpp>
 #include <mppi/sampling_distributions/gaussian/gaussian.cuh>
 
-#include <algorithm>
-#include <cmath>
 #include <iostream>
-#include <iterator>
-#include <numeric>
 #include <string>
-#include <vector>
 
 namespace
 {
@@ -129,7 +125,7 @@ int main(int argc, char** argv)
   // PathTrackingCost has a large device params blob; the combined rollout kernel mis-aligns
   // shared memory (illegal memory access). Use split kernels for the optimization itself.
   controller.setKernelChoice(kernelType::USE_SPLIT_KERNELS);
-  model.GPUSetup();12
+  model.GPUSetup();
   cost.GPUSetup();
 
   DYN::state_array x = model.getZeroState();
@@ -194,102 +190,10 @@ int main(int argc, char** argv)
   //     MPPI optimization above, not subsequent sim-loop iterations.
   // ===========================================================================
 
-  // ---------- ANALYSIS-ONLY (none of this appears in a sim-loop) ----------
-  // After computeControl, trajectory_costs_d_ has been transformed in place by the norm-exp
-  // kernel, so getSampledCostSeq() returns the unnormalized weights w_i = exp(-(c_i-base)/lam).
-  // Recover raw costs as c_i = base - lam * log(w_i). The GPU already included the IS likelihood
-  // term and used the right cost weights, so this is the controller's true view of the rollouts.
-  const auto& weights_eig = controller.getSampledCostSeq();
-  const float baseline = static_cast<float>(controller.getBaselineCost());
-  const float normalizer = static_cast<float>(controller.getNormalizerCost());
-
-  const int num_logged = kNumRollouts;
-  std::vector<float> raw_costs(num_logged, 0.0F);
-  std::vector<float> unnormalized_importance(num_logged, 0.0F);
-  std::vector<float> normalized_weights(num_logged, 0.0F);
-  for (int i = 0; i < num_logged; ++i)
-  {
-    const float w = weights_eig(i);
-    unnormalized_importance[i] = w;
-    normalized_weights[i] = (normalizer > 0.0F) ? w / normalizer : 0.0F;
-    // log(0) guard: degenerate-zero rollouts get a saturated cost so they sit in the tail.
-    raw_costs[i] = (w > 0.0F) ? (baseline - kLambda * std::log(w)) : (baseline + 1.0e30F);
-  }
-
-  // We want to visualize the actual rollouts that the GPU sampled. The library's GPU output
-  // buffer (output_d_) is not reliably accessible from the host (the split dynamics kernel
-  // writes to it but the contents do not survive the kernel boundary in any way the public API
-  // can read). The reliably-accessible thing the GPU produces is the control noise samples in
-  // the sampling distribution's device buffer. Pull those off the GPU and replay each rollout
-  // through the dynamics model on the host to recover the per-rollout (x, y, yaw, vel) trajs.
-  const int H = kMppiHorizon;
-  std::vector<float> host_controls(static_cast<size_t>(num_logged) * H * DYN::CONTROL_DIM);
-  {
-    float* device_controls = sampler.getControlSample(0, 0, 0);
-    HANDLE_ERROR(cudaMemcpy(host_controls.data(), device_controls, host_controls.size() * sizeof(float),
-                            cudaMemcpyDeviceToHost));
-  }
-
-  using OutputTraj = Mppi::output_trajectory;
-  std::vector<OutputTraj> sampled_outputs(num_logged, OutputTraj::Zero());
-  {
-    typename DYN::state_array x_local;
-    typename DYN::state_array x_next = model.getZeroState();
-    typename DYN::state_array xdot = model.getZeroState();
-    typename DYN::output_array y_t = DYN::output_array::Zero();
-    typename DYN::control_array u_local = DYN::control_array::Zero();
-    for (int i = 0; i < num_logged; ++i)
-    {
-      x_local = x;
-      for (int t = 0; t < H; ++t)
-      {
-        const float* src = host_controls.data() + (i * H + t) * DYN::CONTROL_DIM;
-        for (int d = 0; d < DYN::CONTROL_DIM; ++d)
-        {
-          u_local(d) = src[d];
-        }
-        model.enforceConstraints(x_local, u_local);
-        model.step(x_local, x_next, xdot, u_local, y_t, static_cast<float>(t), kDt);
-        sampled_outputs[i].col(t) = y_t;
-        x_local = x_next;
-      }
-    }
-  }
-
-  // Read the optimal control sequence produced by step (2) above. In a real
-  // sim-loop this is read immediately as `u_opt.col(0)` and applied via
-  // model.step (which is what step (3), the missing state update, would do).
-  // Here it's deferred until now only so the analysis CSV writers below can
-  // dump the full horizon u_opt for plotting.
-  const Mppi::control_trajectory u_opt = controller.getControlSeq();
-
-  mppi::rollout_csv::writeMeta<DYN>(prefix + "_meta.csv", x, kDt, kLambda, kMppiHorizon, kNumRollouts, num_logged,
-                                    baseline, normalizer);
-  mppi::rollout_csv::writeCosts(prefix + "_costs.csv", raw_costs, unnormalized_importance, normalized_weights);
-  mppi::rollout_csv::writeCombinedTrajectory<DYN>(model, x, u_opt, prefix + "_combined.csv", kDt);
-  mppi::rollout_csv::writeRolloutTrajectories<DYN>(prefix + "_rollouts_xy.csv", x, kMppiHorizon, sampled_outputs);
-
-  const auto min_it = std::min_element(raw_costs.begin(), raw_costs.end());
-  const int best_idx = static_cast<int>(std::distance(raw_costs.begin(), min_it));
-  // ESS = 1 / sum(w_norm^2): how many rollouts effectively contribute. Healthy = 5-20% of N.
-  float sum_w_sq = 0.0F;
-  for (int i = 0; i < num_logged; ++i)
-  {
-    sum_w_sq += normalized_weights[i] * normalized_weights[i];
-  }
-  const float ess = (sum_w_sq > 0.0F) ? (1.0F / sum_w_sq) : 0.0F;
+  mppi::rollout_csv::dumpSingleMppiIteration<DYN, Mppi, SAMPLER, Mppi::control_trajectory, Mppi::output_trajectory>(
+      model, controller, sampler, x, prefix, kDt, kLambda, kMppiHorizon, kNumRollouts, &path, -1, -1.0F, -1.0F, &ref);
 
   std::cout << "One MPPI iteration done.\n";
-  std::cout << "  baseline=" << baseline << "  normalizer=" << normalizer << "  ESS=" << ess << "/" << num_logged
-            << " (" << (100.0F * ess / static_cast<float>(num_logged)) << "%)\n";
-  std::cout << "  best rollout index=" << best_idx << "  raw_cost=" << raw_costs[best_idx]
-            << "  weight=" << normalized_weights[best_idx] << "\n";
-  if (ess > 0.9F * num_logged)
-  {
-    std::cout << "  warning: ESS ~ N -> weights nearly uniform -> MPPI is averaging out the noise\n"
-                 "           (lambda=" << kLambda << " is too large relative to the cost spread). "
-                 "Try --lambda smaller.\n";
-  }
   std::cout << "Wrote " << prefix << "_meta.csv, _costs.csv, _combined.csv, _rollouts_xy.csv\n";
   std::cout << "Plot: python3 examples/plot_mppi_rollout_analysis.py " << prefix << "\n";
   return 0;
