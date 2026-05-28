@@ -1,7 +1,7 @@
 #include <mppi/dynamics/racer_dubins/racer_dubins.cuh>
 #include <mppi/cost_functions/cost.cuh>
 #include <mppi/controllers/MPPI/mppi_controller.cuh>
-#include <mppi/feedback_controllers/DDP/ddp.cuh>
+#include <mppi/feedback_controllers/feedback.cuh>
 #include <mppi/path/path_projection.hpp>
 #include <mppi/path/path_reference_generator.hpp>
 #include <mppi/path/path2d.hpp>
@@ -10,11 +10,7 @@
 #include <opencv2/opencv.hpp>
 
 #include <algorithm>
-#include <chrono>
 #include <cmath>
-#include <fstream>
-#include <iomanip>
-#include <iostream>
 #include <string>
 #include <random>
 
@@ -95,7 +91,8 @@ namespace
         float4 tex_val = queryTextureTransformed(x, y_pos);
         float track_val = tex_val.x;
 
-        float speed_cost = this->params_.speed_coeff * powf(vel - this->params_.desired_speed, 2);
+        float vel_diff = vel - this->params_.desired_speed;
+        float speed_cost = this->params_.speed_coeff * (vel_diff * vel_diff);
         float track_cost = this->params_.track_coeff * track_val;
         float crash_cost = 0;
         if (track_val >= this->params_.boundary_threshold) {
@@ -104,6 +101,10 @@ namespace
         }
 
         return speed_cost + track_cost + crash_cost;
+    }
+
+    float computeStateCost(const Eigen::Ref<const output_array> y, int timestep, int* crash_status) {
+        return 0.0f;
     }
 
     __device__ float terminalCost(float* y, float* theta_c) {
@@ -149,9 +150,34 @@ namespace
     RacerCost(cudaStream_t stream = 0) : RacerCostImpl<RacerCost>(stream) {}
   };
 
+  // Zero Feedback Controller
+  template <class DYN_T, int NUM_TIMESTEPS = kMppiHorizon>
+  class ZeroFeedbackImpl : public GPUFeedbackController<ZeroFeedbackImpl<DYN_T, NUM_TIMESTEPS>, DYN_T, GPUState> {
+  public:
+    ZeroFeedbackImpl(cudaStream_t stream = 0) : GPUFeedbackController<ZeroFeedbackImpl<DYN_T, NUM_TIMESTEPS>, DYN_T, GPUState>(stream) {}
+    __device__ void k(const float* __restrict__ x_act, const float* __restrict__ x_goal, const int t, float* __restrict__ theta, float* __restrict__ control_output) {}
+  };
+
+  template <class DYN_T, int NUM_TIMESTEPS = kMppiHorizon>
+  class ZeroFeedback : public FeedbackController<ZeroFeedbackImpl<DYN_T, NUM_TIMESTEPS>, int, NUM_TIMESTEPS> {
+  public:
+      using PARENT_CLASS = FeedbackController<ZeroFeedbackImpl<DYN_T, NUM_TIMESTEPS>, int, NUM_TIMESTEPS>;
+      using control_array = typename PARENT_CLASS::control_array;
+      using state_array = typename PARENT_CLASS::state_array;
+      using TEMPLATED_FEEDBACK_STATE = typename PARENT_CLASS::TEMPLATED_FEEDBACK_STATE;
+
+      ZeroFeedback(DYN_T* dyn = nullptr, float dt = 0.01) : PARENT_CLASS(dt, NUM_TIMESTEPS) {}
+
+      void initTrackingController() override {}
+      control_array k_(const Eigen::Ref<const state_array>& x_act, const Eigen::Ref<const state_array>& x_goal, int t, TEMPLATED_FEEDBACK_STATE& fb_state) override {
+          return control_array::Zero();
+      }
+      void computeFeedback(const Eigen::Ref<const state_array>& init_state, const Eigen::Ref<const typename PARENT_CLASS::state_trajectory>& goal_traj, const Eigen::Ref<const typename PARENT_CLASS::control_trajectory>& control_traj) override {}
+  };
+
   using DYN = RacerDubins;
   using COST = RacerCost;
-  using FB = DDPFeedback<DYN, kMppiHorizon>;
+  using FB = ZeroFeedback<DYN, kMppiHorizon>;
   using SAMPLER = mppi::sampling_distributions::GaussianDistribution<DYN::DYN_PARAMS_T>;
   using Mppi = VanillaMPPIController<DYN, COST, FB, kMppiHorizon, kNumRollouts, SAMPLER>;
 
@@ -282,6 +308,7 @@ int main(int argc, char** argv)
     }
     
     COST cost;
+    cost.GPUSetup();
     cost.costmapToTexture(width, height, host_data.data());
     
     RacerCostParams cost_params;
@@ -324,7 +351,6 @@ int main(int argc, char** argv)
       controller.setPercentageSampledControlTrajectories(0.1F);
     }
     model.GPUSetup();
-    cost.GPUSetup();
 
     DYN::state_array x = model.getZeroState();
     const mppi::path::Pose2D p0 = path.poseAt(kInitArcLength);
@@ -384,11 +410,15 @@ int main(int argc, char** argv)
       model.enforceConstraints(x, u_opt.col(0));
       model.step(x, x_next, xdot, u_opt.col(0), y, static_cast<float>(k), kDt);
 
+      u_nom.leftCols(kMppiHorizon - 1) = u_opt.rightCols(kMppiHorizon - 1);
+      u_nom.rightCols(1) = u_opt.rightCols(1); // Repeat the last control, or set to zero
+
       x = x_next;
 
       const mppi::path::PathProjection proj = mppi::path::projectPoseOntoPath(path, x(static_cast<int>(RacerDubinsParams::StateIndex::POS_X)), x(static_cast<int>(RacerDubinsParams::StateIndex::POS_Y)), arcLength);
       arcLength = proj.arc_length_s;
     }
 
+    cost.freeCudaMem();
     return 0;
 }
