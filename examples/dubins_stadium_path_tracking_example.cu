@@ -35,7 +35,7 @@ namespace
   constexpr int kNumRollouts = 4*1024;
   constexpr float kTargetSpeed = 2.5F;
   constexpr float kVMax = 3.0F;
-  constexpr size_t kSimLaps = 2.5F;
+  constexpr size_t kSimLaps = 1;
   
   constexpr float kStraightLength = 40.0F;
   constexpr float kTurnRadius = 10.0F;
@@ -68,9 +68,7 @@ namespace
 
   cv::Point2f worldToPixel(float x, float y, int img_w, int img_h)
   {
-    // Stadium width is ~60m, height ~20m.
-    // Use 12 px/m scale to fit 60m into 800px (720px) with margin.
-    const float scale = 12.0F;
+    const float scale = 15.0F;
     const float u = static_cast<float>(img_w) / 2.0F + x * scale;
     const float v = static_cast<float>(img_h) / 2.0F - y * scale;
     return cv::Point2f(u, v);
@@ -114,6 +112,26 @@ namespace
                cv::Scalar(0, 255, 0), 2); // Green
     }
     cv::addWeighted(overlay, 0.75, img, 0.25, 0, img);
+  }
+
+  void draw_sampled_trajectories(cv::Mat& img, const std::vector<Mppi::output_trajectory>& sampled_trajectories)
+  {
+    if (sampled_trajectories.empty()) return;
+    cv::Mat overlay = img.clone();
+    const int x_idx = static_cast<int>(DubinsBicycleParams::OutputIndex::POS_X);
+    const int y_idx = static_cast<int>(DubinsBicycleParams::OutputIndex::POS_Y);
+    std::cout << "plotting " << sampled_trajectories.size() << " sampled trajectories\n";
+    for (const auto& traj : sampled_trajectories)
+    {
+      // NOTE: the first point corresponds to t=1
+      for (int i = 0; i + 1 < traj.cols(); ++i)
+      {
+        cv::line(overlay, worldToPixel(traj(x_idx, i), traj(y_idx, i), img.cols, img.rows),
+                 worldToPixel(traj(x_idx, i + 1), traj(y_idx, i + 1), img.cols, img.rows),
+                 cv::Scalar(180, 180, 180), 1); // Light Gray
+      }
+    }
+    cv::addWeighted(overlay, 0.4, img, 0.6, 0, img);
   }
 }  // namespace
 
@@ -162,6 +180,7 @@ int main(int argc, char** argv)
       cp.cost_rollout_dim_ = dim3(32, 2, 1);
       cp.seed_ = 42U;
       controller.setParams(cp);
+      controller.setPercentageSampledControlTrajectories(1.0F);
     }
     // PathTrackingCost has a large device params blob; the combined rollout kernel mis-aligns
     // shared memory (illegal memory access). Use split kernels for the optimization itself.
@@ -190,12 +209,14 @@ int main(int argc, char** argv)
 
     float arcLength = kInitArcLength;
 
-    cv::Mat base_frame = cv::Mat::zeros(800, 800, CV_8UC3);
+    cv::Mat base_frame = cv::Mat::zeros(1024, 1024, CV_8UC3);
     // prepare the base frame with the static elements
     draw_centerline(base_frame, path);
     cv::VideoWriter video(video_path, 
-                      cv::VideoWriter::fourcc('M','P','4','V'), 
+                      cv::VideoWriter::fourcc('m','p','4','v'), 
                       static_cast<int>(1.0F/kDt), base_frame.size());
+
+    cv::namedWindow("MPPI Tracking", cv::WINDOW_NORMAL);
 
     for (size_t k = 0; k < num_sim_steps; ++k) {
       const std::vector<mppi::path::PathReferenceSample> ref = ref_gen.generate(path, arcLength, kRefHorizon);
@@ -206,15 +227,22 @@ int main(int argc, char** argv)
       const DYN::control_array u_nom_step = u_nom.col(0);
 
       controller.computeControl(x, 1);
+      cudaStreamSynchronize(controller.stream_);
+      controller.calculateSampledStateTrajectories();
       
       Mppi::control_trajectory u_opt = controller.getControlSeq();
 
       /* Video frame generation */
       const auto state_trajectory = controller.getActualStateSeq();
+      const auto sampled_trajectories = controller.getSampledOutputTrajectories();
       auto frame = base_frame.clone();
       draw_reference_path(frame, ref);
+      // draw_sampled_trajectories(frame, sampled_trajectories); // TODO: this is broken right now
       draw_trajectory(frame, state_trajectory);
       video.write(frame);
+
+      cv::imshow("MPPI Tracking", frame);
+      if (cv::waitKey(1) == 27) break; // Exit on ESC
 
       DYN::state_array x_next = model.getZeroState();
       DYN::state_array xdot = model.getZeroState();
