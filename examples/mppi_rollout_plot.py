@@ -24,18 +24,26 @@ def load_costs(path: Path) -> dict[str, np.ndarray]:
     import csv
 
     idx, raw, unnorm, norm = [], [], [], []
+    path_host: list[float] = []
     with path.open(newline="") as f:
-        for row in csv.DictReader(f):
+        reader = csv.DictReader(f)
+        has_path_host = "path_tracking_cost_host" in (reader.fieldnames or [])
+        for row in reader:
             idx.append(int(row["rollout_index"]))
             raw.append(float(row["raw_cost"]))
             unnorm.append(float(row["unnormalized_importance"]))
             norm.append(float(row["normalized_weight"]))
-    return {
+            if has_path_host:
+                path_host.append(float(row["path_tracking_cost_host"]))
+    out: dict[str, np.ndarray] = {
         "index": np.asarray(idx, dtype=int),
         "raw_cost": np.asarray(raw),
         "unnormalized": np.asarray(unnorm),
         "normalized": np.asarray(norm),
     }
+    if path_host:
+        out["path_tracking_cost_host"] = np.asarray(path_host)
+    return out
 
 
 def unwrap_dyaw(yaw0: float, yaw1: float) -> float:
@@ -168,6 +176,7 @@ def pick_rollout_encoding(
     weights: np.ndarray,
     *,
     weight_spread_tol: float = 0.015,
+    path_host_costs: np.ndarray | None = None,
 ) -> tuple[np.ndarray, str, str, float, float, str]:
     """
     Choose visual score in [0, 1] (1 = best).
@@ -187,12 +196,21 @@ def pick_rollout_encoding(
         score = np.clip(w / w_max, 0.0, 1.0) if w_max > 0 else np.ones_like(w)
         return score, "weight", "MPPI weight (color & α)", 0.0, w_max, "viridis"
 
+    if path_host_costs is not None and path_host_costs.size == raw.size:
+        c = np.asarray(path_host_costs, dtype=float)
+        c_min = float(np.min(c))
+        c_max = float(np.max(c))
+        if c_max - c_min < 1e-9:
+            return np.ones_like(c), "path_host", "path tracking cost (flat)", c_min, c_max, "coolwarm_r"
+        score = 1.0 - (c - c_min) / (c_max - c_min)
+        return score, "path_host", "path tracking cost on host (cool=best)", c_min, c_max, "coolwarm_r"
+
     c = raw.copy()
     c[~finite] = float(np.nanmax(c[finite])) + 1.0
     c_min = float(np.min(c))
     c_max = float(np.max(c))
     if c_max - c_min < 1e-9:
-        return np.ones_like(c), "cost", "trajectory cost (flat)", c_min, c_max, "coolwarm_r"
+        return np.ones_like(c), "cost", "GPU total cost flat — color not meaningful", c_min, c_max, "coolwarm_r"
     score = 1.0 - (c - c_min) / (c_max - c_min)
     return score, "cost", "trajectory cost (color & α, cool=best)", c_min, c_max, "coolwarm_r"
 
@@ -217,7 +235,7 @@ def scores_to_rgba(
 
     rank_t = _rank01(s)
     cmap = plt.get_cmap(cmap_name)
-    if encoding == "cost":
+    if encoding in ("cost", "path_host"):
         # Color by actual cost (low = good = cool end of coolwarm_r).
         norm = Normalize(vmin=cbar_vmin, vmax=cbar_vmax)
         raw_for_color = cbar_vmax - s * (cbar_vmax - cbar_vmin)
@@ -225,8 +243,12 @@ def scores_to_rgba(
     else:
         rgba = np.asarray(cmap(Normalize(vmin=0.0, vmax=1.0)(s)), dtype=float)
 
-  # Rank-based α: best rollouts opaque, worst nearly invisible (avoids solid blob).
-    rgba[:, 3] = alpha_min + (alpha_max - alpha_min) * rank_t
+    # Rank-based α only when scores actually vary; flat costs use uniform faint lines.
+    if float(np.max(s) - np.min(s)) < 1e-9:
+        rgba[:, 3] = (alpha_min + alpha_max) * 0.5
+    else:
+        rank_t = _rank01(s)
+        rgba[:, 3] = alpha_min + (alpha_max - alpha_min) * rank_t
     return rgba
 
 
@@ -287,6 +309,7 @@ def build_rollout_analysis_figure(
     combined = load_combined(paths["combined"])
 
     raw = costs["raw_cost"]
+    path_host = costs.get("path_tracking_cost_host")
     raw_finite = finite_raw_costs(raw)
     weights = costs["normalized"]
     baseline = meta.get("baseline", float(np.min(raw)))
@@ -295,16 +318,22 @@ def build_rollout_analysis_figure(
     n_rollouts = int(meta.get("num_rollouts", len(weights)))
     w_by_rollout = np.zeros(n_rollouts, dtype=float)
     c_by_rollout = np.full(n_rollouts, np.inf, dtype=float)
+    path_by_rollout = np.full(n_rollouts, np.nan, dtype=float)
     for i, r in enumerate(costs["index"]):
         if 0 <= r < n_rollouts:
             w_by_rollout[r] = weights[i]
             c_by_rollout[r] = raw[i]
+            if path_host is not None:
+                path_by_rollout[r] = path_host[i]
     seg_weights = w_by_rollout[seg_ids]
     seg_costs = c_by_rollout[seg_ids]
+    seg_path_host = path_by_rollout[seg_ids] if path_host is not None else None
     ess = effective_sample_size(weights)
 
     score, enc_mode, cbar_label, cbar_vmin, cbar_vmax, cmap_auto = pick_rollout_encoding(
-        seg_costs, seg_weights
+        seg_costs,
+        seg_weights,
+        path_host_costs=seg_path_host if seg_path_host is not None else None,
     )
     cmap_use = rollout_cmap if rollout_cmap is not None else cmap_auto
     seg_rgba = scores_to_rgba(
@@ -374,7 +403,7 @@ def build_rollout_analysis_figure(
                 label="ref (log t=0)",
                 zorder=4,
             )
-    if enc_mode == "cost":
+    if enc_mode in ("cost", "path_host"):
         sm = ScalarMappable(cmap=plt.get_cmap(cmap_use), norm=Normalize(vmin=cbar_vmin, vmax=cbar_vmax))
     else:
         sm = ScalarMappable(cmap=plt.get_cmap(cmap_use), norm=Normalize(vmin=0.0, vmax=cbar_vmax))
@@ -479,9 +508,12 @@ def build_rollout_analysis_figure(
     time_lbl = ""
     if not np.isnan(sim_t):
         time_lbl = f"  log step {int(sim_step)} t={sim_t:.2f}s"
-    enc_note = "cost" if enc_mode == "cost" else "weight"
+    enc_note = enc_mode if enc_mode in ("cost", "path_host") else "weight"
     ess_pct = 100.0 * ess / max(n_total, 1)
     cost_spread = float(np.max(raw_finite) - np.min(raw_finite)) if raw_finite.size else 0.0
+    path_spread_note = ""
+    if path_host is not None and np.any(np.isfinite(path_host)):
+        path_spread_note = f"  path_host Δ={float(np.nanmax(path_host)-np.nanmin(path_host)):.3g}"
     lam_suggest = suggest_lambda(raw, n_total)
     turn_note = ""
     if ref_h is not None and abs(ref_dyaw) > 0.05:
@@ -490,7 +522,7 @@ def build_rollout_analysis_figure(
     ax_xy.set_title(
         f"All MPPI rollouts (n={n_drawn}/{n_total}, color/α by {enc_note})  "
         f"λ={meta.get('lambda', 0):.3g}  ESS≈{ess:.0f} ({ess_pct:.0f}%)  Δcost≈{cost_spread:.3g}  "
-        f"try λ≈{lam_suggest:.0f}{turn_note}{time_lbl}"
+        f"try λ≈{lam_suggest:.0f}{path_spread_note}{turn_note}{time_lbl}"
     )
     ax_xy.grid(True, alpha=0.3)
     ax_xy.legend(loc="best", fontsize=8)

@@ -115,10 +115,11 @@ int main(int argc, char** argv)
   FB feedback(&model, kDt);
   Mppi::control_trajectory u_nom = Mppi::control_trajectory::Zero();
   Mppi controller(&model, &cost, &feedback, &sampler, kDt, 1, kLambda, 0.0F, kMppiHorizon, u_nom);
+  controller.setPercentageSampledControlTrajectories(1.0F);
   {
     auto cp = controller.getParams();
     cp.dynamics_rollout_dim_ = dim3(32, 2, 1);
-    cp.cost_rollout_dim_ = dim3(32, 2, 1);
+    cp.cost_rollout_dim_ = dim3(kMppiHorizon, 1, 1);
     cp.seed_ = 42U;
     controller.setParams(cp);
   }
@@ -190,8 +191,9 @@ int main(int argc, char** argv)
   //     MPPI optimization above, not subsequent sim-loop iterations.
   // ===========================================================================
 
-  mppi::rollout_csv::dumpSingleMppiIteration<DYN, Mppi, SAMPLER, Mppi::control_trajectory, Mppi::output_trajectory>(
-      model, controller, sampler, x, prefix, kDt, kLambda, kMppiHorizon, kNumRollouts, &path, -1, -1.0F, -1.0F, &ref);
+  mppi::rollout_csv::dumpSingleMppiIteration<DYN, COST, Mppi, SAMPLER, Mppi::control_trajectory, Mppi::output_trajectory>(
+      model, cost, controller, sampler, x, prefix, kDt, kLambda, kMppiHorizon, kNumRollouts, &path, -1, -1.0F, -1.0F,
+      &ref);
 
   std::cout << "One MPPI iteration done.\n";
   std::cout << "Wrote " << prefix << "_meta.csv, _costs.csv, _combined.csv, _rollouts_xy.csv\n";

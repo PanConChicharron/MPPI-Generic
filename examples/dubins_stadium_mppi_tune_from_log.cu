@@ -280,10 +280,11 @@ int main(int argc, char** argv)
   FB feedback(&model, kDt);
   Mppi::control_trajectory u_nom = Mppi::control_trajectory::Zero();
   Mppi controller(&model, &cost, &feedback, &sampler, kDt, 1, lambda, 0.0F, kMppiHorizon, u_nom);
+  controller.setPercentageSampledControlTrajectories(1.0F);
   {
     auto cp = controller.getParams();
     cp.dynamics_rollout_dim_ = dim3(32, 2, 1);
-    cp.cost_rollout_dim_ = dim3(32, 2, 1);
+    cp.cost_rollout_dim_ = dim3(kMppiHorizon, 1, 1);
     cp.seed_ = seed;
     controller.setParams(cp);
   }
@@ -313,8 +314,8 @@ int main(int argc, char** argv)
   controller.computeControl(x, 1);
 
   const float t_solve = static_cast<float>(step_1based - 1) * kDt;
-  mppi::rollout_csv::dumpSingleMppiIteration<DYN, Mppi, SAMPLER, Mppi::control_trajectory, Mppi::output_trajectory>(
-      model, controller, sampler, x, prefix, kDt, lambda, kMppiHorizon, kNumRollouts, &path, step_1based, t_solve,
+  mppi::rollout_csv::dumpSingleMppiIteration<DYN, COST, Mppi, SAMPLER, Mppi::control_trajectory, Mppi::output_trajectory>(
+      model, cost, controller, sampler, x, prefix, kDt, lambda, kMppiHorizon, kNumRollouts, &path, step_1based, t_solve,
       proj.distance, &ref);
   appendMetaKeys(prefix + "_meta.csv", cw, lambda);
 

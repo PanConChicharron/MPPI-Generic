@@ -10,7 +10,7 @@
  * Schemas (in lock-step with `examples/plot_mppi_rollout_analysis.py`):
  *   <prefix>_centerline.csv : x_m,y_m
  *   <log_stem>_meta.csv     : key,value (MPPI rollout analysis and track-departure events)
- *   <prefix>_costs.csv      : rollout_index,raw_cost,unnormalized_importance,normalized_weight
+ *   <prefix>_costs.csv      : rollout_index,raw_cost,path_tracking_cost_host,unnormalized_importance,normalized_weight
  *   <prefix>_combined.csv   : step,t,x,y,yaw,vel_x,steer,u_accel,u_steer
  *   <prefix>_rollouts_xy.csv: rollout_index,step,x,y,yaw,vel_x
  *   <prefix>_reference.csv   : k,t,arc_s,x,y,yaw,v  (MPPI cost reference horizon)
@@ -152,19 +152,38 @@ inline void writeReferenceHorizon(const std::string& path, const std::vector<mpp
 
 inline void writeCosts(const std::string& path, const std::vector<float>& raw_costs,
                        const std::vector<float>& unnormalized_importance,
-                       const std::vector<float>& normalized_weights)
+                       const std::vector<float>& normalized_weights,
+                       const std::vector<float>& path_tracking_cost_host = {})
 {
   std::ofstream f(path.c_str());
   if (!f)
   {
     return;
   }
-  f << "rollout_index,raw_cost,unnormalized_importance,normalized_weight\n";
+  const bool have_path_host = path_tracking_cost_host.size() == raw_costs.size();
+  if (have_path_host)
+  {
+    f << "rollout_index,raw_cost,path_tracking_cost_host,unnormalized_importance,normalized_weight\n";
+  }
+  else
+  {
+    f << "rollout_index,raw_cost,unnormalized_importance,normalized_weight\n";
+  }
   f << std::setprecision(9);
   const int n = static_cast<int>(raw_costs.size());
   for (int i = 0; i < n; ++i)
   {
-    f << i << "," << raw_costs[i] << "," << unnormalized_importance[i] << "," << normalized_weights[i] << "\n";
+    if (have_path_host)
+    {
+      f << i << "," << raw_costs[static_cast<size_t>(i)] << "," << path_tracking_cost_host[static_cast<size_t>(i)]
+        << "," << unnormalized_importance[static_cast<size_t>(i)] << "," << normalized_weights[static_cast<size_t>(i)]
+        << "\n";
+    }
+    else
+    {
+      f << i << "," << raw_costs[static_cast<size_t>(i)] << "," << unnormalized_importance[static_cast<size_t>(i)]
+        << "," << normalized_weights[static_cast<size_t>(i)] << "\n";
+    }
   }
 }
 

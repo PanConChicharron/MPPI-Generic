@@ -34,7 +34,7 @@ namespace
   constexpr int kMppiHorizon = 50;
   constexpr int kRefHorizon = kMppiHorizon + 8;
   constexpr float kDt = 0.1F;
-  constexpr int kNumRollouts = 4*1024;
+  constexpr int kNumRollouts = 32;
   constexpr float kTargetSpeed = 2.5F;
   constexpr float kVMax = 3.0F;
   constexpr float kSimLaps = 2.5F;
@@ -54,7 +54,8 @@ namespace
   constexpr float kNoiseStdSteer = 0.12F;
   constexpr float kNomLatSteerGain = 0.0F;
   constexpr float kNomHeadingSteerGain = 0.0F;
-  constexpr float kLambda = 30.0F;
+  constexpr float kLambda = 3.F;
+  constexpr float kAlpha = 1.0F;
   
   using DYN = DubinsBicycle;
   using COST = PathTrackingCost<kRefHorizon>;
@@ -116,7 +117,7 @@ int main(int argc, char** argv)
     PathTrackingCostParams<kRefHorizon> cost_params;
     // Order: w_pos, w_heading_so2, w_vel, w_lat_accel, w_lat_jerk, w_steer_dot, w_accel, w_steer.
     // Light comfort (like dubins_circle_path_tracking_example); heavy w_steer_dot blocks steering without nom gains.
-    mppi::path::fillPathTrackingCostWeights<kRefHorizon>(cost_params, 20.0F, 3.0F, 5.0F, 1.0F, 0.05F, 0.0F, 0.05F, 0.05F);
+    mppi::path::fillPathTrackingCostWeights<kRefHorizon>(cost_params, 5.0F, 3.0F, 2.0F, 1.0F, 0.05F, 0.0F, 0.05F, 0.05F);
     mppi::path::fillPathTrackingBicycleGeometry<kRefHorizon>(cost_params, dyn);
     cost.setParams(cost_params);
 
@@ -130,11 +131,15 @@ int main(int argc, char** argv)
 
     FB feedback(&model, kDt);
     Mppi::control_trajectory u_nom = Mppi::control_trajectory::Zero();
-    Mppi controller(&model, &cost, &feedback, &sampler, kDt, 1, kLambda, 0.0F, kMppiHorizon, u_nom);
+    Mppi controller(&model, &cost, &feedback, &sampler, kDt, 1, kLambda, kAlpha, kMppiHorizon, u_nom);
+    // Needed for dump diagnostics that compare GPU rollout outputs against host replay.
+    controller.setPercentageSampledControlTrajectories(1.0F);
     {
       auto cp = controller.getParams();
       cp.dynamics_rollout_dim_ = dim3(32, 2, 1);
-      cp.cost_rollout_dim_ = dim3(32, 2, 1);
+      // Split rolloutCostKernel uses COALESCE loads: thread t must use y_shared[t], which requires
+      // blockDim.x >= num_timesteps (see mppi_common rolloutCostKernel). Horizon 50 + block 32 mis-associates y.
+      cp.cost_rollout_dim_ = dim3(kMppiHorizon, 1, 1);
       cp.seed_ = 42U;
       controller.setParams(cp);
     }
@@ -204,9 +209,9 @@ int main(int argc, char** argv)
         const int step_1based = static_cast<int>(k) + 1;
         const float t_solve = static_cast<float>(k) * kDt;
         const std::string prefix = mppi::rollout_csv::analysisPrefixForLogStep(log_path, step_1based);
-        mppi::rollout_csv::dumpSingleMppiIteration<DYN, Mppi, SAMPLER, Mppi::control_trajectory,
+        mppi::rollout_csv::dumpSingleMppiIteration<DYN, COST, Mppi, SAMPLER, Mppi::control_trajectory,
                                                    Mppi::output_trajectory>(
-            model, controller, sampler, x, prefix, kDt, kLambda, kMppiHorizon, kNumRollouts, &path, step_1based,
+            model, cost, controller, sampler, x, prefix, kDt, kLambda, kMppiHorizon, kNumRollouts, &path, step_1based,
             t_solve, proj_pre.distance, &ref);
         deviation_steps.push_back(std::to_string(step_1based));
         deviation_times.push_back(std::to_string(t_solve));
