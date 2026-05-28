@@ -108,7 +108,14 @@ namespace
     }
 
     __device__ float terminalCost(float* y, float* theta_c) {
-        return 0.0f;
+      float x = y[static_cast<int>(RacerDubinsParams::OutputIndex::BASELINK_POS_I_X)];
+      float y_pos = y[static_cast<int>(RacerDubinsParams::OutputIndex::BASELINK_POS_I_Y)];
+    
+      // Penalize the end point heavily if it strays from the dead-center of the track
+      float track_val = queryTextureTransformed(x, y_pos).x;
+    
+      // 10x multiplier on the terminal state makes MPPI plan to end exactly on the centerline
+      return this->params_.track_coeff * track_val * 10.0f; 
     }
 
     void costmapToTexture(int width, int height, float4* host_data) {
