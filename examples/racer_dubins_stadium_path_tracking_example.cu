@@ -1,3 +1,8 @@
+/**
+ * @file racer_dubins_stadium_path_tracking_example.cu
+ * @brief Example of MPPI-based path tracking and obstacle avoidance for a Racer Dubins model on a stadium track.
+ */
+
 #include <mppi/dynamics/racer_dubins/racer_dubins.cuh>
 #include <mppi/cost_functions/cost.cuh>
 #include <mppi/controllers/MPPI/mppi_controller.cuh>
@@ -16,10 +21,11 @@
 
 namespace
 {
+  // --- Simulation Parameters ---
   constexpr int kMppiHorizon = 50;
-  constexpr int kRefHorizon = kMppiHorizon + 8;
+  constexpr int kRefHorizon = kMppiHorizon;
   constexpr float kDt = 0.1F;
-  constexpr int kNumRollouts = 4*1024;
+  constexpr int kNumRollouts = 8*1024;
   constexpr float kTargetSpeed = 2.5F;
   constexpr float kVMax = 3.0F;
   constexpr size_t kSimLaps = 1;
@@ -33,6 +39,10 @@ namespace
   
   constexpr float kLambda = 100.0F;
 
+  /**
+   * @struct RacerCostParams
+   * @brief Parameters for the Racer cost function.
+   */
   struct RacerCostParams : public ::CostParams<2>
   {
     float desired_speed = kTargetSpeed;
@@ -46,6 +56,10 @@ namespace
     float3 trs = make_float3(0, 0, 1);
   };
 
+  /**
+   * @class RacerCostImpl
+   * @brief Implements cost calculations for the RacerDubins model, including GPU-accelerated costmap lookup.
+   */
   template <class CLASS_T, class PARAMS_T = RacerCostParams, class DYN_PARAMS_T = RacerDubinsParams>
   class RacerCostImpl : public ::Cost<CLASS_T, PARAMS_T, DYN_PARAMS_T>
   {
@@ -81,6 +95,7 @@ namespace
         return tex2D<float4>(costmap_tex_d_, u / w, v / w);
     }
 
+    // GPU-side state cost computation
     __device__ float computeStateCost(float* y, int timestep, float* theta_c, int* crash_status) {
         float x = y[static_cast<int>(RacerDubinsParams::OutputIndex::BASELINK_POS_I_X)];
         float y_pos = y[static_cast<int>(RacerDubinsParams::OutputIndex::BASELINK_POS_I_Y)];
@@ -95,7 +110,6 @@ namespace
         float crash_cost = 0;
         if (track_val >= this->params_.boundary_threshold) {
             crash_cost = this->params_.crash_coeff;
-            // *crash_status = 1;
         }
 
         return speed_cost + track_cost + crash_cost;
@@ -104,6 +118,7 @@ namespace
     cv::Mat cpu_costmap_;
     void setCpuCostmap(const cv::Mat& costmap) { cpu_costmap_ = costmap; }
 
+    // CPU-side state cost computation for nominal trajectory evaluation
     float computeStateCost(const Eigen::Ref<const output_array> y, int timestep, int* crash_status) {
         if (cpu_costmap_.empty()) return 0.0f;
 
@@ -128,7 +143,7 @@ namespace
         float crash_cost = 0;
         if (track_val >= this->params_.boundary_threshold) {
             crash_cost = this->params_.crash_coeff;
-            // *crash_status = 1;
+            *crash_status = 1;
         }
 
         return speed_cost + track_cost + crash_cost;
@@ -138,10 +153,8 @@ namespace
       float x = y[static_cast<int>(RacerDubinsParams::OutputIndex::BASELINK_POS_I_X)];
       float y_pos = y[static_cast<int>(RacerDubinsParams::OutputIndex::BASELINK_POS_I_Y)];
     
-      // Penalize the end point heavily if it strays from the dead-center of the track
       float track_val = queryTextureTransformed(x, y_pos).x;
     
-      // 10x multiplier on the terminal state makes MPPI plan to end exactly on the centerline
       return this->params_.track_coeff * track_val * 10.0f; 
     }
 
@@ -184,7 +197,10 @@ namespace
     RacerCost(cudaStream_t stream = 0) : RacerCostImpl<RacerCost>(stream) {}
   };
 
-  // Zero Feedback Controller
+  /**
+   * @class ZeroFeedbackImpl
+   * @brief GPU-side implementation for a feedback controller that provides no feedback.
+   */
   template <class DYN_T, int NUM_TIMESTEPS = kMppiHorizon>
   class ZeroFeedbackImpl : public GPUFeedbackController<ZeroFeedbackImpl<DYN_T, NUM_TIMESTEPS>, DYN_T, GPUState> {
   public:
@@ -192,6 +208,10 @@ namespace
     __device__ void k(const float* __restrict__ x_act, const float* __restrict__ x_goal, const int t, float* __restrict__ theta, float* __restrict__ control_output) {}
   };
 
+  /**
+   * @class ZeroFeedback
+   * @brief CPU-side wrapper for the zero feedback controller.
+   */
   template <class DYN_T, int NUM_TIMESTEPS = kMppiHorizon>
   class ZeroFeedback : public FeedbackController<ZeroFeedbackImpl<DYN_T, NUM_TIMESTEPS>, int, NUM_TIMESTEPS> {
   public:
@@ -209,18 +229,25 @@ namespace
       void computeFeedback(const Eigen::Ref<const state_array>& init_state, const Eigen::Ref<const typename PARENT_CLASS::state_trajectory>& goal_traj, const Eigen::Ref<const typename PARENT_CLASS::control_trajectory>& control_traj) override {}
   };
 
+  // --- MPPI Controller Setup ---
   using DYN = RacerDubins;
   using COST = RacerCost;
   using FB = ZeroFeedback<DYN, kMppiHorizon>;
   using SAMPLER = mppi::sampling_distributions::GaussianDistribution<DYN::DYN_PARAMS_T>;
   using Mppi = VanillaMPPIController<DYN, COST, FB, kMppiHorizon, kNumRollouts, SAMPLER>;
 
+  /**
+   * @brief Calculates simulation steps needed for a given number of laps.
+   */
   int simStepsForLaps(const mppi::path::Path2D& path, const float laps)
   {
     const float lap_time = path.length() / kVMax;
     return static_cast<int>(std::ceil(laps * lap_time / kDt));
   }
 
+  /**
+   * @brief Converts world coordinates to pixel coordinates for visualization.
+   */
   cv::Point2f worldToPixel(float x, float y, int img_w, int img_h)
   {
     const float scale = 15.0F;
@@ -229,6 +256,8 @@ namespace
     return cv::Point2f(u, v);
   }
 
+  // --- Visualization Utilities ---
+  
   void draw_centerline(cv::Mat& img, const mppi::path::Path2D& path)
   {
     cv::Mat overlay = img.clone();
@@ -250,7 +279,7 @@ namespace
     {
       cv::line(overlay, worldToPixel(ref[i].x, ref[i].y, img.cols, img.rows),
                worldToPixel(ref[i + 1].x, ref[i + 1].y, img.cols, img.rows),
-               cv::Scalar(255, 0, 0), 2); // Blue
+               cv::Scalar(255, 0, 0), 2);
     }
     cv::addWeighted(overlay, 0.5, img, 0.5, 0, img);
   }
@@ -264,7 +293,7 @@ namespace
     {
       cv::line(overlay, worldToPixel(traj(x_idx, i), traj(y_idx, i), img.cols, img.rows),
                worldToPixel(traj(x_idx, i + 1), traj(y_idx, i + 1), img.cols, img.rows),
-               cv::Scalar(0, 255, 0), 2); // Green
+               cv::Scalar(0, 255, 0), 2);
     }
     cv::addWeighted(overlay, 0.75, img, 0.25, 0, img);
   }
@@ -281,15 +310,23 @@ namespace
       {
         cv::line(overlay, worldToPixel(traj(x_idx, i), traj(y_idx, i), img.cols, img.rows),
                  worldToPixel(traj(x_idx, i + 1), traj(y_idx, i + 1), img.cols, img.rows),
-                 cv::Scalar(180, 180, 180), 1); // Light Gray
+                 cv::Scalar(180, 180, 180), 1);
       }
     }
     cv::addWeighted(overlay, 0.4, img, 0.6, 0, img);
   }
 }  // namespace
 
+/**
+ * @brief Main simulation loop for the Racer Dubins path tracking example.
+ *
+ * @param argc Argument count.
+ * @param argv Argument vector (optional: seed for RNG).
+ * @return int Exit code.
+ */
 int main(int argc, char** argv)
 {
+    // 1. Initialize random seed for reproducibility
     unsigned int seed = 42;
     if (argc > 1) {
         seed = std::stoul(argv[1]);
@@ -298,6 +335,7 @@ int main(int argc, char** argv)
     std::string video_path = "racer_dubins_stadium_path_tracking.mp4";
 
     /* Environment */
+    // 2. Generate track path (stadium shape)
     const mppi::path::Path2D path = mppi::path::Path2D::stadium(kStraightLength, kTurnRadius, kSamplesPerArc);
     
     float x_min = -40, x_max = 60, y_min = -30, y_max = 30;
@@ -320,13 +358,13 @@ int main(int argc, char** argv)
 
     cv::GaussianBlur(costmap_img, costmap_img, cv::Size(21, 21), 5.0);
     
-    // Add obstacles
+    // 3. Generate obstacles once
     struct Obstacle { float ox; float oy; float r; };
     std::vector<Obstacle> obstacles;
     std::mt19937 gen(seed);
     std::uniform_real_distribution<float> dist_s(0, path.length());
-    std::uniform_real_distribution<float> dist_side(-1.0, 2.0);
-    std::uniform_real_distribution<float> dist_r(2.0, 2.5);
+    std::uniform_real_distribution<float> dist_side(-1.0, 1.0);
+    std::uniform_real_distribution<float> dist_r(2.0, 3.5);
     
     for (int i = 0; i < 15; ++i) {
         float s = dist_s(gen);
@@ -345,9 +383,10 @@ int main(int argc, char** argv)
     
     cv::GaussianBlur(costmap_img, costmap_img, cv::Size(5, 5), 1.0);
     
-    // Save the costmap to an image file
+    // Save the costmap for debugging/visualization
     cv::imwrite("costmap.png", costmap_img * 255.0);
     
+    // 4. Prepare cost data for GPU transfer
     std::vector<float4> host_data(width * height);
     for (int i = 0; i < height; ++i) {
         for (int j = 0; j < width; ++j) {
@@ -372,6 +411,7 @@ int main(int argc, char** argv)
     ref_gen.setSpeedCap(kVMax);
 
     /* Model parameters */
+    // 5. Setup model and sampling distributions
     DYN model;
     RacerDubinsParams dyn;
     dyn.wheel_base = 0.3f;
@@ -381,13 +421,13 @@ int main(int argc, char** argv)
     u_rng[static_cast<int>(RacerDubinsParams::ControlIndex::STEER_CMD)] = { -1.0f, 1.0f };
     model.setControlRanges(u_rng);
 
-    /* Sampling parameters */
     SAMPLER::SAMPLING_PARAMS_T sp{};
     sp.std_dev[static_cast<int>(RacerDubinsParams::ControlIndex::THROTTLE_BRAKE)] = 0.2F;
     sp.std_dev[static_cast<int>(RacerDubinsParams::ControlIndex::STEER_CMD)] = 0.6F;
     sp.sum_strides = std::max(32, (kNumRollouts + 1023) / 1024);
     SAMPLER sampler(sp);
 
+    // 6. Setup MPPI Controller
     FB feedback(&model, kDt);
     Mppi::control_trajectory u_nom = Mppi::control_trajectory::Zero();
     Mppi controller(&model, &cost, &feedback, &sampler, kDt, 1, kLambda, 0.0F, kMppiHorizon, u_nom);
@@ -401,6 +441,7 @@ int main(int argc, char** argv)
     }
     model.GPUSetup();
 
+    // 7. Initialize simulation state
     DYN::state_array x = model.getZeroState();
     const mppi::path::Pose2D p0 = path.poseAt(kInitArcLength);
     x(static_cast<int>(RacerDubinsParams::StateIndex::POS_X)) = p0.x;
@@ -410,9 +451,10 @@ int main(int argc, char** argv)
 
     float arcLength = kInitArcLength;
 
+    // 8. Prepare visualization
     cv::Mat base_frame = cv::Mat::zeros(1024, 1024, CV_8UC3);
     draw_centerline(base_frame, path);
-    // Draw obstacles on base frame for visualization
+    // Draw obstacles on base frame
     for (const auto& obs : obstacles) {
         cv::circle(base_frame, worldToPixel(obs.ox, obs.oy, 1024, 1024), obs.r * 15.0f, cv::Scalar(0, 0, 255), -1);
     }
@@ -424,10 +466,14 @@ int main(int argc, char** argv)
     cv::namedWindow("MPPI Tracking", cv::WINDOW_NORMAL);
     cv::resizeWindow("MPPI Tracking", base_frame.cols, base_frame.rows);
 
+    // 9. Main simulation loop
     for (size_t k = 0; k < num_sim_steps; ++k) {
       const std::vector<mppi::path::PathReferenceSample> ref = ref_gen.generate(path, arcLength, kRefHorizon);
+      
+      // Update importance sampling based on current nominal control
       controller.updateImportanceSampler(u_nom);
 
+      // Compute control sequence
       controller.computeControl(x, 1);
       cudaStreamSynchronize(controller.stream_);
       controller.calculateSampledStateTrajectories();
@@ -444,8 +490,9 @@ int main(int argc, char** argv)
       video.write(frame);
 
       cv::imshow("MPPI Tracking", frame);
-      if (cv::waitKey(1) == 27) break; 
+      if (cv::waitKey(1) == 27) break; // Exit on ESC
 
+      // Step simulation model
       DYN::state_array x_next = model.getZeroState();
       DYN::state_array xdot = model.getZeroState();
       DYN::output_array y = DYN::output_array::Zero();
@@ -453,11 +500,13 @@ int main(int argc, char** argv)
       model.enforceConstraints(x, u_opt.col(0));
       model.step(x, x_next, xdot, u_opt.col(0), y, static_cast<float>(k), kDt);
 
+      // Shift nominal control trajectory for the next step
       u_nom.leftCols(kMppiHorizon - 1) = u_opt.rightCols(kMppiHorizon - 1);
-      u_nom.rightCols(1) = u_opt.rightCols(1); // Repeat the last control, or set to zero
+      u_nom.rightCols(1) = u_opt.rightCols(1); 
 
       x = x_next;
 
+      // Project state onto path to update progress
       const mppi::path::PathProjection proj = mppi::path::projectPoseOntoPath(path, x(static_cast<int>(RacerDubinsParams::StateIndex::POS_X)), x(static_cast<int>(RacerDubinsParams::StateIndex::POS_Y)), arcLength);
       arcLength = proj.arc_length_s;
     }
