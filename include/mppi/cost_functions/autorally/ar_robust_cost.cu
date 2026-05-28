@@ -82,6 +82,8 @@ __host__ __device__ float ARRobustCostImpl<CLASS_T, PARAMS_T>::getCostmapCost(co
   query.y = fmaxf(0.0f, fminf(this->height_ - 1, query.y));
   float4 track_params_back = this->track_costs_[std::round(query.y) * this->width_ + std::round(query.x)];
 #endif
+  // printf("thread (%d %d %d) front val (%f, %f) %f back_val (%f, %f) %f\n", threadIdx.x, threadIdx.y, threadIdx.z,
+  // x_front, y_front, track_params_front.x, x_back, y_back, track_params_back.x);
 
   // Calculate the constraint penalty
   float constraint_val = fminf(1.0, fmaxf(track_params_front.x, track_params_back.x));

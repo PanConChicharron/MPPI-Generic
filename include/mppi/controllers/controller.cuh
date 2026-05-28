@@ -105,8 +105,7 @@ public:
 
   // Cost typedefs
   typedef Eigen::Matrix<float, MAX_TIMESTEPS + 1, 1> cost_trajectory;  // +1 for terminal cost
-  // Host-side rollout costs (not Eigen::Matrix<NUM_ROLLOUTS,1>: fixed-size limit ~32k × float).
-  using sampled_cost_traj = Eigen::VectorXf;
+  typedef Eigen::Matrix<float, NUM_ROLLOUTS, 1> sampled_cost_traj;
   typedef Eigen::Matrix<int, MAX_TIMESTEPS, 1> crash_status_trajectory;
 
   Controller(DYN_T* model, COST_T* cost, FB_T* fb_controller, SAMPLING_T* sampler, float dt, int max_iter, float lambda,
@@ -269,11 +268,6 @@ public:
 
   virtual void GPUSetup()
   {
-    if (trajectory_costs_.size() != NUM_ROLLOUTS)
-    {
-      trajectory_costs_.resize(NUM_ROLLOUTS);
-      trajectory_costs_.setZero();
-    }
     // Call the GPU setup functions of the model, cost, sampling distribution, and feedback controller
     model_->GPUSetup();
     cost_->GPUSetup();
@@ -839,6 +833,7 @@ public:
 
   void setParams(const PARAMS_T& p)
   {
+    bool change_seed = p.seed_ != params_.seed_;
     bool change_num_timesteps = p.num_timesteps_ != params_.num_timesteps_;
     bool change_dt = p.dt_ != params_.dt_;
     // bool change_std_dev = p.control_std_dev_ != params_.control_std_dev_;
@@ -847,8 +842,10 @@ public:
     {
       setNumTimesteps(p.num_timesteps_);
     }
-    // Always reset offset (e.g. chooseAppropriateKernel() draws samples before the sim loop).
-    setSeedCUDARandomNumberGen(params_.seed_);
+    if (change_seed)
+    {
+      setSeedCUDARandomNumberGen(params_.seed_);
+    }
     if (change_dt)
     {
       fb_controller_->setDt(p.dt_);
@@ -974,7 +971,7 @@ protected:
   control_trajectory control_ = control_trajectory::Zero();
   state_trajectory state_ = state_trajectory::Zero();
   output_trajectory output_ = output_trajectory::Zero();
-  sampled_cost_traj trajectory_costs_;
+  sampled_cost_traj trajectory_costs_ = sampled_cost_traj::Zero();
   std::vector<float2> cost_baseline_and_norm_ = { make_float2(0.0, 0.0) };
   bool CUDA_mem_init_ = false;
 

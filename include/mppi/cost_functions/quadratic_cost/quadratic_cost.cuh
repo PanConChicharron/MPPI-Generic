@@ -23,10 +23,6 @@ struct QuadraticCostTrajectoryParams : public CostParams<DYN_T::CONTROL_DIM>
 
   int current_time = 0;
 
-  /** If in [0, OUTPUT_DIM), that output uses s_coeff * |wrap(y - y_ref)| (shortest angle in (-π,π]) instead of
-   *  s_coeff * (y - y_ref)^2. Default -1 keeps pure quadratic on all channels. */
-  int yaw_wrapped_abs_cost_index = -1;
-
   QuadraticCostTrajectoryParams()
   {
     for (int i = 0; i < DYN_T::CONTROL_DIM; i++)

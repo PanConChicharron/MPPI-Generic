@@ -16,8 +16,6 @@ RobustMPPI::RobustMPPIController(DYN_T* model, COST_T* cost, FB_T* fb_controller
   : PARENT_CLASS(model, cost, fb_controller, sampler, dt, max_iter, lambda, alpha, num_timesteps, init_control_traj,
                  stream)
 {
-  trajectory_costs_nominal_.resize(NUM_ROLLOUTS);
-  trajectory_costs_nominal_.setZero();
   setValueFunctionThreshold(value_function_threshold);
   setOptimizationStride(optimization_stride);
   setNumCandidates(num_candidate_nominal_states);
@@ -50,8 +48,6 @@ RobustMPPI::RobustMPPIController(DYN_T* model, COST_T* cost, FB_T* fb_controller
                                  cudaStream_t stream)
   : PARENT_CLASS(model, cost, fb_controller, sampler, params, stream)
 {
-  trajectory_costs_nominal_.resize(NUM_ROLLOUTS);
-  trajectory_costs_nominal_.setZero();
   updateNumCandidates(getNumCandidates());
   setParams(params);
   this->sampler_->setNumDistributions(2);

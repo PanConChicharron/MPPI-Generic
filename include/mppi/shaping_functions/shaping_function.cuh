@@ -19,7 +19,7 @@ template <class CLASS_T, class PARAMS_T, int NUM_ROLLOUTS, int BDIM_X>
 class ShapingFunctionImpl : public Managed
 {
 public:
-  using cost_traj = Eigen::VectorXf;
+  typedef Eigen::Matrix<float, NUM_ROLLOUTS, 1> cost_traj;
 
   ShapingFunctionImpl()
   {
