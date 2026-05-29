@@ -553,8 +553,7 @@ __global__ void visualizeCostKernel(COST_T* __restrict__ costs, SAMPLING_T* __re
   float* y_shared = entire_buffer;
   float* u_shared = &y_shared[math::nearest_multiple_4(blockDim.x * blockDim.z * COST_T::OUTPUT_DIM)];
   float* running_cost_shared = &u_shared[math::nearest_multiple_4(blockDim.x * blockDim.z * COST_T::CONTROL_DIM)];
-  int* crash_status_shared =
-      (int*)&running_cost_shared[math::nearest_multiple_4(blockDim.y * blockDim.z * num_timesteps)];
+  int* crash_status_shared = (int*)&running_cost_shared[math::nearest_multiple_4(blockDim.y * blockDim.z * blockDim.z)];
   float* theta_c = (float*)&crash_status_shared[math::nearest_multiple_4(blockDim.x * blockDim.z)];
   float* theta_d = &theta_c[size_of_theta_c_bytes / sizeof(float)];
 #ifdef USE_CUDA_BARRIERS_COST
@@ -570,6 +569,7 @@ __global__ void visualizeCostKernel(COST_T* __restrict__ costs, SAMPLING_T* __re
   float* running_cost;
   int sample_time_offset = 0;
   int cost_index = 0;
+  int r_cost_index = blockDim.x * blockDim.y * thread_idz + thread_idx;
 
   // Load global array to shared array
   y = &y_shared[shared_idx * COST_T::OUTPUT_DIM];
@@ -596,8 +596,8 @@ __global__ void visualizeCostKernel(COST_T* __restrict__ costs, SAMPLING_T* __re
   for (int time_iter = 0; time_iter < max_time_iters; ++time_iter)
   {
     int t = thread_idx + time_iter * blockDim.x;
-    cost_index = (thread_idz * num_rollouts + global_idx) * (num_timesteps) + t - 1;
-    running_cost = &running_cost_shared[blockDim.x * (thread_idz * blockDim.y + thread_idy) + t - 1];
+    cost_index = (thread_idz * num_rollouts + global_idx) * (num_timesteps + 1) + t;
+    running_cost = &running_cost_shared[r_cost_index + blockDim.x * thread_idy];
     if (COALESCE)
     {  // Fill entire shared mem sequentially using sequential threads_idx
       int amount_to_fill = (time_iter + 1) * blockDim.x > num_timesteps ? num_timesteps % blockDim.x : blockDim.x;
@@ -634,11 +634,26 @@ __global__ void visualizeCostKernel(COST_T* __restrict__ costs, SAMPLING_T* __re
 #else
     __syncthreads();
 #endif
+    /**
+     * Due to the fact the blockDim.x is not required to be a divisor of num_timesteps, we have to do the consolidation
+     * and write to global memory inside the for loop. This differs from the rolloutCostKernel() because we want to save
+     * out the cost at each timestep, not the aggregate cost over time.
+     */
+    // consolidate y threads into single cost
+    costArrayReduction(&running_cost_shared[r_cost_index], blockDim.y, thread_idy, blockDim.y,
+                       thread_idy == blockDim.y - 1, blockDim.x);
+#ifdef USE_CUDA_BARRIERS_COST
+    bar->arrive_and_wait();
+#else
+    __syncthreads();
+#endif
+    // Write to global memory
+    if (t < num_timesteps && threadIdx.y == 0)
+    {
+      cost_traj_d[cost_index] = running_cost_shared[r_cost_index];
+    }
   }
-  // consolidate y threads into single cost
-  running_cost = &running_cost_shared[thread_idx + blockDim.x * blockDim.y * thread_idz];
   __syncthreads();
-  costArrayReduction(running_cost, blockDim.y, thread_idy, blockDim.y, thread_idy == blockDim.y - 1, blockDim.x);
   // point every thread to the last output at t = NUM_TIMESTEPS for terminal cost calculation
   const int last_y_index = (num_timesteps - 1) % blockDim.x;
   y = &y_shared[(blockDim.x * thread_idz + last_y_index) * COST_T::OUTPUT_DIM];
@@ -653,40 +668,8 @@ __global__ void visualizeCostKernel(COST_T* __restrict__ costs, SAMPLING_T* __re
   // Compute terminal cost for each thread
   if (threadIdx.x == 0 && threadIdx.y == 0)
   {
-    cost_index = (threadIdx.z * num_rollouts + global_idx) * (num_timesteps + 1) + num_timesteps;
+    cost_index = (thread_idz * num_rollouts + global_idx) * (num_timesteps + 1) + num_timesteps;
     cost_traj_d[cost_index] = costs->terminalCost(y, theta_c) / (num_timesteps);
-  }
-  __syncthreads();
-  // Copy to global memory
-  if (num_timesteps % 4 == 0)
-  {
-    float4* cost_traj_d4 =
-        reinterpret_cast<float4*>(&cost_traj_d[(thread_idz * num_rollouts + global_idx) * num_timesteps]);
-    float4* running_cost_shared4 =
-        reinterpret_cast<float4*>(&running_cost_shared[thread_idz * num_timesteps * blockDim.y]);
-    for (int i = thread_idx; i < num_timesteps / 4; i += blockDim.x)
-    {
-      cost_traj_d4[i] = running_cost_shared4[i];
-    }
-  }
-  else if (num_timesteps % 2 == 0)
-  {
-    float2* cost_traj_d2 =
-        reinterpret_cast<float2*>(&cost_traj_d[(thread_idz * num_rollouts + global_idx) * num_timesteps]);
-    float2* running_cost_shared2 =
-        reinterpret_cast<float2*>(&running_cost_shared[thread_idz * num_timesteps * blockDim.y]);
-    for (int i = thread_idx; i < num_timesteps / 2; i += blockDim.x)
-    {
-      cost_traj_d2[i] = running_cost_shared2[i];
-    }
-  }
-  else
-  {
-    for (int i = thread_idx; i < num_timesteps; i += blockDim.x)
-    {
-      cost_traj_d[(thread_idz * num_rollouts + global_idx) * num_timesteps + i] =
-          running_cost_shared[thread_idz * num_timesteps * blockDim.y + i];
-    }
   }
 }
 
@@ -1378,7 +1361,7 @@ void launchVisualizeCostKernel(COST_T* __restrict__ costs, SAMPLING_T* __restric
   }
 
   dim3 dimCostGrid(num_rollouts, 1, 1);
-  unsigned shared_mem_size = calcVisCostKernelSharedMemSize(costs, sampling, num_timesteps, dimBlock);
+  unsigned shared_mem_size = calcRolloutCostKernelSharedMemSize(costs, sampling, dimBlock);
   visualizeCostKernel<COST_T, SAMPLING_T, COALESCE><<<dimCostGrid, dimBlock, shared_mem_size, stream>>>(
       costs->cost_d_, sampling->sampling_d_, dt, num_timesteps, num_rollouts, lambda, alpha, y_d, cost_traj_result,
       sampled_crash_status_d);
@@ -1552,7 +1535,7 @@ unsigned calcVisCostKernelSharedMemSize(const COST_T* cost, const SAMPLER_T* sam
   unsigned shared_mem_size = sizeof(float) * (math::nearest_multiple_4(shared_num * COST_T::OUTPUT_DIM) +
                                               math::nearest_multiple_4(shared_num * COST_T::CONTROL_DIM) +
                                               math::nearest_multiple_4(dimBlock.z * num_timesteps * dimBlock.y)) +
-                             sizeof(int) * math::nearest_multiple_4(dimBlock.z * num_timesteps) +
+                             sizeof(int) * math::nearest_multiple_4(dimBlock.z * dimBlock.y * num_timesteps) +
                              calcClassSharedMemSize(cost, dimBlock) +
                              calcClassSharedMemSize<SAMPLER_T>(sampler, dimBlock);
 #ifdef USE_CUDA_BARRIERS_COST
