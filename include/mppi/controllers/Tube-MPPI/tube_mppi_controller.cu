@@ -14,8 +14,6 @@ TubeMPPI::TubeMPPIController(DYN_T* model, COST_T* cost, FB_T* fb_controller, SA
   : PARENT_CLASS(model, cost, fb_controller, sampler, dt, max_iter, lambda, alpha, num_timesteps, init_control_traj,
                  stream)
 {
-  trajectory_costs_nominal_.resize(NUM_ROLLOUTS);
-  trajectory_costs_nominal_.setZero();
   nominal_control_trajectory_ = init_control_traj;
 
   // call rollout kernel with z = 2 since we have a nominal state
@@ -37,8 +35,6 @@ TubeMPPI::TubeMPPIController(DYN_T* model, COST_T* cost, FB_T* fb_controller, SA
                              cudaStream_t stream)
   : PARENT_CLASS(model, cost, fb_controller, sampler, params, stream)
 {
-  trajectory_costs_nominal_.resize(NUM_ROLLOUTS);
-  trajectory_costs_nominal_.setZero();
   nominal_control_trajectory_ = this->params_.init_control_traj_;
 
   // call rollout kernel with z = 2 since we have a nominal state

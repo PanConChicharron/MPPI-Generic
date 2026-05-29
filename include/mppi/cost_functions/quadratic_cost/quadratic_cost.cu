@@ -1,5 +1,4 @@
 #include <mppi/cost_functions/quadratic_cost/quadratic_cost.cuh>
-#include <mppi/utils/angle_utils.cuh>
 
 template <class CLASS_T, class DYN_T, class PARAMS_T>
 QuadraticCostImpl<CLASS_T, DYN_T, PARAMS_T>::QuadraticCostImpl(cudaStream_t stream)
@@ -13,21 +12,15 @@ float QuadraticCostImpl<CLASS_T, DYN_T, PARAMS_T>::computeStateCost(const Eigen:
 {
   float cost = 0;
   output_array des_state = this->params_.getDesiredState(timestep);
-  const int yaw_i = this->params_.yaw_wrapped_abs_cost_index;
 
+  Eigen::Matrix<float, DYN_T::OUTPUT_DIM, DYN_T::OUTPUT_DIM> coeffs;
+  coeffs = Eigen::Matrix<float, DYN_T::OUTPUT_DIM, DYN_T::OUTPUT_DIM>::Zero();
   for (int i = 0; i < DYN_T::OUTPUT_DIM; i++)
   {
-    if (yaw_i >= 0 && yaw_i < DYN_T::OUTPUT_DIM && i == yaw_i)
-    {
-      const float e = angle_utils::shortestAngularDistance(des_state(i), s(i));
-      cost += this->params_.s_coeffs[i] * fabsf(e);
-    }
-    else
-    {
-      const float e = s(i) - des_state(i);
-      cost += this->params_.s_coeffs[i] * e * e;
-    }
+    coeffs(i, i) = this->params_.s_coeffs[i];
   }
+  output_array error = s - des_state;
+  cost = error.transpose() * coeffs * error;
 
   return cost;
 }
@@ -45,19 +38,10 @@ __device__ float QuadraticCostImpl<CLASS_T, DYN_T, PARAMS_T>::computeStateCost(f
   float cost = 0;
 
   float* desired_state = this->params_.getGoalStatePointer(timestep);
-  const int yaw_i = this->params_.yaw_wrapped_abs_cost_index;
 
   for (int i = 0; i < DYN_T::OUTPUT_DIM; i++)
   {
-    if (yaw_i >= 0 && yaw_i < DYN_T::OUTPUT_DIM && i == yaw_i)
-    {
-      const float e = angle_utils::shortestAngularDistance(desired_state[i], s[i]);
-      cost += fabsf(e) * this->params_.s_coeffs[i];
-    }
-    else
-    {
-      cost += powf(s[i] - desired_state[i], 2) * this->params_.s_coeffs[i];
-    }
+    cost += powf(s[i] - desired_state[i], 2) * this->params_.s_coeffs[i];
   }
 
   return cost;

@@ -78,15 +78,6 @@ public:
   {
     return track_costs_;
   }
-
-  /** Replace CPU costmap cells (size must be width_ * height_); call updateTransform + costmapToTexture after. */
-  void setTrackCostCells(const std::vector<float4>& cells)
-  {
-    if (width_ > 0 && height_ > 0 && cells.size() == static_cast<size_t>(width_ * height_))
-    {
-      track_costs_ = cells;
-    }
-  }
   inline Eigen::Matrix3f getRotation();
   inline Eigen::Array3f getTranslation();
   // inline __host__ __device__ cudaArray* getCudaArray() {return costmapArray_d_;}

@@ -107,11 +107,6 @@ void VanillaMPPI::chooseAppropriateKernel()
         this->params_.dynamics_rollout_dim_, this->stream_, true);
   }
   auto end_single_kernel_time = std::chrono::steady_clock::now();
-  const bool single_kernel_failed = cudaGetLastError() != cudaSuccess;
-  if (single_kernel_failed)
-  {
-    cudaGetLastError();
-  }
   auto start_split_kernel_time = std::chrono::steady_clock::now();
   for (int i = 0; i < this->getNumKernelEvaluations() && !too_much_mem_split_kernel; i++)
   {
@@ -132,10 +127,10 @@ void VanillaMPPI::chooseAppropriateKernel()
     split_kernel_time_ms = mppi::math::timeDiffms(end_split_kernel_time, start_split_kernel_time);
   }
   std::string kernel_choice = "";
-  if (single_kernel_failed || split_kernel_time_ms < single_kernel_time_ms)
+  if (split_kernel_time_ms < single_kernel_time_ms)
   {
     this->setKernelChoice(kernelType::USE_SPLIT_KERNELS);
-    kernel_choice = single_kernel_failed ? "split (single kernel failed) " : "split ";
+    kernel_choice = "split ";
   }
   else
   {
@@ -192,8 +187,6 @@ void VanillaMPPI::computeControl(const Eigen::Ref<const state_array>& state, int
     HANDLE_ERROR(cudaMemcpyAsync(this->trajectory_costs_.data(), this->trajectory_costs_d_,
                                  NUM_ROLLOUTS * sizeof(float), cudaMemcpyDeviceToHost, this->stream_));
     HANDLE_ERROR(cudaStreamSynchronize(this->stream_));
-
-    this->last_raw_rollout_costs_ = this->trajectory_costs_;
 
     this->setBaseline(mppi::kernels::computeBaselineCost(this->trajectory_costs_.data(), NUM_ROLLOUTS));
 
