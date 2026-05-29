@@ -9,24 +9,20 @@
  *
  * Schemas (in lock-step with `examples/plot_mppi_rollout_analysis.py`):
  *   <prefix>_centerline.csv : x_m,y_m
- *   <log_stem>_meta.csv     : key,value (MPPI rollout analysis and track-departure events)
- *   <prefix>_costs.csv      : rollout_index,raw_cost,path_tracking_cost_host,unnormalized_importance,normalized_weight
+ *   <prefix>_meta.csv       : key,value
+ *   <prefix>_costs.csv      : rollout_index,raw_cost,unnormalized_importance,normalized_weight
  *   <prefix>_combined.csv   : step,t,x,y,yaw,vel_x,steer,u_accel,u_steer
  *   <prefix>_rollouts_xy.csv: rollout_index,step,x,y,yaw,vel_x
- *   <prefix>_reference.csv   : k,t,arc_s,x,y,yaw,v  (MPPI cost reference horizon)
  */
 #ifndef MPPI_ROLLOUT_CSV_HPP_
 #define MPPI_ROLLOUT_CSV_HPP_
 
 #include <Eigen/Dense>
 #include <mppi/path/path2d.hpp>
-#include <mppi/path/path_reference_generator.hpp>
 
 #include <fstream>
-#include <iomanip>
 #include <iostream>
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace mppi
@@ -57,25 +53,18 @@ inline void writeCenterline(const mppi::path::Path2D& path, const std::string& p
  * a full log path like "foo.csv": writes "foo_centerline.csv" (or appends
  * "_centerline.csv" if the path doesn't end in ".csv").
  */
-inline std::string sidecarPathForLog(const std::string& log_csv_path, const char* suffix)
+inline void writeCenterlineForLog(const mppi::path::Path2D& path, const std::string& log_csv_path)
 {
   std::string out = log_csv_path;
   const size_t n = out.size();
   if (n > 4U && out.compare(n - 4U, 4U, ".csv") == 0)
   {
-    out.insert(n - 4U, suffix);
+    out.insert(n - 4U, "_centerline");
   }
   else
   {
-    out += suffix;
-    out += ".csv";
+    out += "_centerline.csv";
   }
-  return out;
-}
-
-inline void writeCenterlineForLog(const mppi::path::Path2D& path, const std::string& log_csv_path)
-{
-  const std::string out = sidecarPathForLog(log_csv_path, "_centerline");
   std::ofstream f(out.c_str());
   if (!f)
   {
@@ -87,27 +76,6 @@ inline void writeCenterlineForLog(const mppi::path::Path2D& path, const std::str
     f << a.x << "," << a.y << "\n";
   }
   std::cout << "Wrote centerline for plot: " << out << "\n";
-}
-
-/** Sister file to the temporal log: `<log_stem>_meta.csv` with `key,value` rows. */
-inline void writeKeyValueMetaForLog(const std::string& log_csv_path,
-                                    const std::vector<std::pair<std::string, std::string>>& rows, bool log_path = true)
-{
-  const std::string out = sidecarPathForLog(log_csv_path, "_meta");
-  std::ofstream f(out.c_str());
-  if (!f)
-  {
-    return;
-  }
-  f << "key,value\n";
-  for (const auto& kv : rows)
-  {
-    f << kv.first << "," << kv.second << "\n";
-  }
-  if (log_path)
-  {
-    std::cout << "Wrote log meta: " << out << "\n";
-  }
 }
 
 template <class DYN_T>
@@ -135,55 +103,20 @@ void writeMeta(const std::string& path, const typename DYN_T::state_array& x, fl
   f << "init_steer," << x(static_cast<int>(S::STEER_ANGLE)) << "\n";
 }
 
-inline void writeReferenceHorizon(const std::string& path, const std::vector<mppi::path::PathReferenceSample>& ref)
-{
-  std::ofstream f(path.c_str());
-  if (!f)
-  {
-    return;
-  }
-  f << "k,t,arc_s,x,y,yaw,v\n";
-  for (size_t k = 0; k < ref.size(); ++k)
-  {
-    const mppi::path::PathReferenceSample& r = ref[k];
-    f << k << "," << r.t << "," << r.arc_length_s << "," << r.x << "," << r.y << "," << r.yaw << "," << r.v << "\n";
-  }
-}
-
 inline void writeCosts(const std::string& path, const std::vector<float>& raw_costs,
                        const std::vector<float>& unnormalized_importance,
-                       const std::vector<float>& normalized_weights,
-                       const std::vector<float>& path_tracking_cost_host = {})
+                       const std::vector<float>& normalized_weights)
 {
   std::ofstream f(path.c_str());
   if (!f)
   {
     return;
   }
-  const bool have_path_host = path_tracking_cost_host.size() == raw_costs.size();
-  if (have_path_host)
-  {
-    f << "rollout_index,raw_cost,path_tracking_cost_host,unnormalized_importance,normalized_weight\n";
-  }
-  else
-  {
-    f << "rollout_index,raw_cost,unnormalized_importance,normalized_weight\n";
-  }
-  f << std::setprecision(9);
+  f << "rollout_index,raw_cost,unnormalized_importance,normalized_weight\n";
   const int n = static_cast<int>(raw_costs.size());
   for (int i = 0; i < n; ++i)
   {
-    if (have_path_host)
-    {
-      f << i << "," << raw_costs[static_cast<size_t>(i)] << "," << path_tracking_cost_host[static_cast<size_t>(i)]
-        << "," << unnormalized_importance[static_cast<size_t>(i)] << "," << normalized_weights[static_cast<size_t>(i)]
-        << "\n";
-    }
-    else
-    {
-      f << i << "," << raw_costs[static_cast<size_t>(i)] << "," << unnormalized_importance[static_cast<size_t>(i)]
-        << "," << normalized_weights[static_cast<size_t>(i)] << "\n";
-    }
+    f << i << "," << raw_costs[i] << "," << unnormalized_importance[i] << "," << normalized_weights[i] << "\n";
   }
 }
 
