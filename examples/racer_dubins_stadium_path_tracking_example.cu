@@ -204,6 +204,18 @@ namespace
         }
     }
 
+    void updateCostmapTexture(float4* host_data) {
+        if (costmapArray_d_ == nullptr) {
+            printf("Error: Costmap array not initialized! Call costmapToTexture first.\n");
+            return;
+        }
+
+        // Copy the new data into the EXISTING GPU array. 
+        HANDLE_ERROR(cudaMemcpyToArray(costmapArray_d_, 0, 0, host_data, 
+                                       width_ * height_ * sizeof(float4), 
+                                       cudaMemcpyHostToDevice));
+    }
+
     cudaArray* costmapArray_d_ = nullptr;
     cudaTextureObject_t costmap_tex_d_;
     cudaChannelFormatDesc channelDesc_;
@@ -247,6 +259,50 @@ namespace
       }
       void computeFeedback(const Eigen::Ref<const state_array>& init_state, const Eigen::Ref<const typename PARENT_CLASS::state_trajectory>& goal_traj, const Eigen::Ref<const typename PARENT_CLASS::control_trajectory>& control_traj) override {}
   };
+
+  // Obstacle structure
+  struct Obstacle { float ox; float oy; float r; };
+
+  // Helper to update the costmap
+  void updateCostmap(cv::Mat& costmap_img, const std::vector<mppi::path::PathReferenceSample>& ref, 
+                     const std::vector<Obstacle>& obstacles, int width, int height, float ppm, 
+                     float x_min, float y_min, std::vector<float4>& cost_map_gpu_data)
+  {
+    auto worldToMap = [&](float x, float y) {
+        return cv::Point((x - x_min) * ppm, (y - y_min) * ppm);
+    };
+
+    // 1. Reset costmap and Draw road based on reference path
+    costmap_img = cv::Mat::ones(height, width, CV_32FC1);
+    cv::Mat center_img = cv::Mat::ones(height, width, CV_8UC1) * 255;
+    
+    if (ref.size() >= 2) {
+        for (size_t i = 0; i < ref.size() - 1; ++i) {
+            cv::line(center_img, worldToMap(ref[i].x, ref[i].y), 
+                     worldToMap(ref[i+1].x, ref[i+1].y), cv::Scalar(0), 1);
+        }
+    }
+
+    // 2. Compute Distance Transform
+    cv::Mat dist_img;
+    cv::distanceTransform(center_img, dist_img, cv::DIST_L2, 3);
+    dist_img.convertTo(costmap_img, CV_32FC1, 1.0 / 25.0);
+    cv::threshold(costmap_img, costmap_img, 0.75, 0.75, cv::THRESH_TRUNC);
+    
+    // 3. Draw obstacles
+    for (const auto& obs : obstacles) {
+        cv::circle(costmap_img, worldToMap(obs.ox, obs.oy), obs.r * ppm, cv::Scalar(1.0), -1);
+    }
+    
+    cv::GaussianBlur(costmap_img, costmap_img, cv::Size(5, 5), 1.0);
+    
+    // 4. Prepare cost data for GPU
+    for (int i = 0; i < height; ++i) {
+        for (int j = 0; j < width; ++j) {
+            cost_map_gpu_data[i * width + j] = make_float4(costmap_img.at<float>(i, j), 0, 0, 0);
+        }
+    }
+  }
 
   // --- MPPI Controller Setup ---
   using DYN = RacerDubins;
@@ -368,6 +424,8 @@ int main(int argc, char** argv)
         return cv::Point((x - x_min) * ppm, (y - y_min) * ppm);
     };
     
+
+    // TODO: calculate road costs for the reference at each iteration, update with the updateCostmapTexture
     // Draw road (cost 0.0)
     // 1. Draw a 1-pixel thin centerline on a blank binary image (White background, Black line)
     cv::Mat center_img = cv::Mat::ones(height, width, CV_8UC1) * 255;
@@ -391,7 +449,6 @@ int main(int argc, char** argv)
     cv::threshold(costmap_img, costmap_img, 0.75, 0.75, cv::THRESH_TRUNC);
     
     // 3. Generate obstacles once
-    struct Obstacle { float ox; float oy; float r; };
     std::vector<Obstacle> obstacles;
     std::mt19937 gen(seed);
     std::uniform_real_distribution<float> dist_s(0, path.length());
@@ -408,28 +465,10 @@ int main(int argc, char** argv)
         obstacles.push_back({p.x - side * ty, p.y + side * tx, r});
     }
 
-    // Draw obstacles on costmap
-    for (const auto& obs : obstacles) {
-        cv::circle(costmap_img, worldToMap(obs.ox, obs.oy), obs.r * ppm, cv::Scalar(1.0), -1);
-    }
-    
-    cv::GaussianBlur(costmap_img, costmap_img, cv::Size(5, 5), 1.0);
-    
-    // Save the costmap for debugging/visualization
-    cv::imwrite("costmap.png", costmap_img * 255.0);
-    
-    // 4. Prepare cost data for GPU transfer
-    std::vector<float4> host_data(width * height);
-    for (int i = 0; i < height; ++i) {
-        for (int j = 0; j < width; ++j) {
-            host_data[i * width + j] = make_float4(costmap_img.at<float>(i, j), 0, 0, 0);
-        }
-    }
-    
     COST cost;
     cost.GPUSetup();
-    cost.costmapToTexture(width, height, host_data.data());
-    cost.setCpuCostmap(costmap_img);
+    std::vector<float4> cost_map_gpu_data(width * height, make_float4(0,0,0,0));
+    cost.costmapToTexture(width, height, cost_map_gpu_data.data());
     
     RacerCostParams cost_params;
     cost_params.r_c1 = make_float3(1.0f / (x_max - x_min), 0, 0);
@@ -494,6 +533,9 @@ int main(int argc, char** argv)
     cv::VideoWriter video(video_path, 
                       cv::VideoWriter::fourcc('m','p','4','v'), 
                       static_cast<int>(1.0F/kDt), base_frame.size());
+    cv::VideoWriter costmap_video("racer_dubins_stadium_costmap.mp4", 
+                               cv::VideoWriter::fourcc('m','p','4','v'), 
+                               static_cast<int>(1.0F/kDt), costmap_img.size());
 
     cv::namedWindow("MPPI Tracking", cv::WINDOW_NORMAL);
     cv::resizeWindow("MPPI Tracking", base_frame.cols, base_frame.rows);
@@ -501,6 +543,18 @@ int main(int argc, char** argv)
     // 9. Main simulation loop
     for (size_t k = 0; k < num_sim_steps; ++k) {
       const std::vector<mppi::path::PathReferenceSample> ref = ref_gen.generate(path, arcLength, kRefHorizon);
+      
+      // Update the costmap
+      updateCostmap(costmap_img, ref, obstacles, width, height, ppm, x_min, y_min, cost_map_gpu_data);
+      
+      // Save costmap frame
+      cv::Mat costmap_vis;
+      costmap_img.convertTo(costmap_vis, CV_8UC1, 255.0);
+      cv::cvtColor(costmap_vis, costmap_vis, cv::COLOR_GRAY2BGR);
+      costmap_video.write(costmap_vis);
+
+      cost.updateCostmapTexture(cost_map_gpu_data.data());
+      cost.setCpuCostmap(costmap_img);
       
       // Update importance sampling based on current nominal control
       controller.updateImportanceSampler(u_nom);
@@ -515,7 +569,9 @@ int main(int argc, char** argv)
       /* Video frame generation */
       const auto state_trajectory = controller.getActualStateSeq();
       const auto sampled_trajectories = controller.getSampledOutputTrajectories();
+      
       auto frame = base_frame.clone();
+      
       draw_reference_path(frame, ref);
       draw_sampled_trajectories(frame, sampled_trajectories);
       draw_trajectory(frame, state_trajectory);
