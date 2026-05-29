@@ -63,7 +63,6 @@ inline void fillCostFromPathReference(PathTrackingCostParams<REF_HORIZON>& cost_
     }
     cost_params.s_goal[base + static_cast<int>(O::STEER_ANGLE)] = steer_ref;
   }
-  cost_params.setCurrentTime(0);
 }
 
 /**

@@ -162,7 +162,7 @@ int main(int argc, char** argv)
 
       std::cout << "Section 5\n";
       controller.computeControl(x, 1);
-      
+      std::cout << "Section 5.1\n";
       Mppi::control_trajectory u_opt = controller.getControlSeq();
 
       std::cout << "Section 6\n";

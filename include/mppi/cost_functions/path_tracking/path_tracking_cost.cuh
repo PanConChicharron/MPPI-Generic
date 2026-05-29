@@ -29,12 +29,11 @@ struct PathTrackingCostParams : public CostParams<DubinsBicycle::CONTROL_DIM>
   float w_lat_jerk = 100.0F;
   float w_steer_dot = 100.0F;
 
-  /** Bicycle geometry for comfort terms (set from DubinsBicycleParams on host). */
   float wheel_base = 0.32F;
   float steer_time_constant = 0.08F;
 
+  // This is cleanly overwritten via fillCostFromPathReference every step on host
   float s_goal[OUTPUT_DIM * REF_HORIZON] = { 0 };
-  int current_time = 0;
 
   PathTrackingCostParams()
   {
@@ -44,8 +43,13 @@ struct PathTrackingCostParams : public CostParams<DubinsBicycle::CONTROL_DIM>
 
   __host__ __device__ int goalIndex(const int timestep) const
   {
-    int idx = current_time + timestep;
-    if (idx >= TIME_HORIZON)
+    // Clamp the local rollout lookahead timestep safely within the allocated window
+    int idx = timestep;
+    if (idx < 0)
+    {
+      idx = 0;
+    }
+    else if (idx >= TIME_HORIZON)
     {
       idx = TIME_HORIZON - 1;
     }
@@ -55,11 +59,6 @@ struct PathTrackingCostParams : public CostParams<DubinsBicycle::CONTROL_DIM>
   __host__ __device__ const float* goalAt(const int timestep) const
   {
     return s_goal + goalIndex(timestep);
-  }
-
-  __host__ void setCurrentTime(const int t)
-  {
-    current_time = t;
   }
 };
 
@@ -73,6 +72,8 @@ public:
   static constexpr float MAX_COST_VALUE = 1e16;
 
   PathTrackingCostImpl(cudaStream_t stream = nullptr);
+
+  __device__ void initializeCosts(float* output, float* control, float* theta_c, float t_0, float dt);
 
   std::string getCostFunctionName() const override
   {

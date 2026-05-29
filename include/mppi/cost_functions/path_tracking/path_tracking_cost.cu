@@ -119,6 +119,17 @@ __host__ __device__ float pathTrackingControlCost(const PathTrackingCostParams<R
 
 }  // namespace
 
+
+template <class CLASS_T, int REF_HORIZON>
+__device__ void PathTrackingCostImpl<CLASS_T, REF_HORIZON>::initializeCosts(float* output, float* control, 
+                                                                           float* theta_c, float t_0, float dt)
+{
+  if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0)
+  {
+    auto* shared_params = reinterpret_cast<PathTrackingCostParams<REF_HORIZON>*>(theta_c);
+    *shared_params = this->params_;
+  }
+}
 template <class CLASS_T, int REF_HORIZON>
 PathTrackingCostImpl<CLASS_T, REF_HORIZON>::PathTrackingCostImpl(cudaStream_t stream)
 {
