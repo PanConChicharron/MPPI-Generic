@@ -159,12 +159,17 @@ float PathTrackingCostImpl<CLASS_T, REF_HORIZON>::computeRunningCost(const Eigen
   return cost;
 }
 
+// =============================================================================
+// UPDATED DEVICE KERNEL INTERFACES (Bound via Dynamic Shared memory `theta_c`)
+// =============================================================================
+
 template <class CLASS_T, int REF_HORIZON>
-__device__ float PathTrackingCostImpl<CLASS_T, REF_HORIZON>::computeStateCost(float* y, const int timestep, float*,
+__device__ float PathTrackingCostImpl<CLASS_T, REF_HORIZON>::computeStateCost(float* y, const int timestep, float* theta_c,
                                                                               int* crash_status)
 {
   (void)crash_status;
-  return pathTrackingStateCost(this->params_, y, timestep);
+  auto* shared_params = reinterpret_cast<PathTrackingCostParams<REF_HORIZON>*>(theta_c);
+  return pathTrackingStateCost(*shared_params, y, timestep);
 }
 
 template <class CLASS_T, int REF_HORIZON>
@@ -178,16 +183,17 @@ __device__ float PathTrackingCostImpl<CLASS_T, REF_HORIZON>::computeControlCost(
                                                                                 float* theta_c, int* crash)
 {
   (void)timestep;
-  (void)theta_c;
   (void)crash;
-  return pathTrackingControlCost(this->params_, u);
+  auto* shared_params = reinterpret_cast<PathTrackingCostParams<REF_HORIZON>*>(theta_c);
+  return pathTrackingControlCost(*shared_params, u);
 }
 
 template <class CLASS_T, int REF_HORIZON>
 __device__ float PathTrackingCostImpl<CLASS_T, REF_HORIZON>::computeRunningCost(float* y, float* u, const int timestep,
                                                                                 float* theta_c, int* crash)
 {
-  float cost = pathTrackingRunningCost(this->params_, y, u, timestep);
+  auto* shared_params = reinterpret_cast<PathTrackingCostParams<REF_HORIZON>*>(theta_c);
+  float cost = pathTrackingRunningCost(*shared_params, y, u, timestep);
   cost += this->computeControlCost(u, timestep, theta_c, crash);
   return cost;
 }

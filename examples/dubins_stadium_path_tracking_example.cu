@@ -112,6 +112,11 @@ int main(int argc, char** argv)
     u_rng[static_cast<int>(DubinsBicycleParams::ControlIndex::STEER)] = { -dyn.max_steer_angle, dyn.max_steer_angle };
     model.setControlRanges(u_rng);
 
+    SAMPLER::SAMPLING_PARAMS_T sp{};
+    sp.std_dev[static_cast<int>(DubinsBicycleParams::ControlIndex::ACCEL)] = kNoiseStdAccel;
+    sp.std_dev[static_cast<int>(DubinsBicycleParams::ControlIndex::STEER)] = kNoiseStdSteer;
+    SAMPLER sampler(sp);
+
     COST cost;
     PathTrackingCostParams<kRefHorizon> cost_params;
     // Order: w_pos, w_heading_so2, w_vel, w_lat_accel, w_lat_jerk, w_steer_dot, w_accel, w_steer.
@@ -119,14 +124,6 @@ int main(int argc, char** argv)
     mppi::path::fillPathTrackingCostWeights<kRefHorizon>(cost_params, 5.0F, 3.0F, 2.0F, 1.0F, 0.05F, 0.0F, 0.05F, 0.05F);
     mppi::path::fillPathTrackingBicycleGeometry<kRefHorizon>(cost_params, dyn);
     cost.setParams(cost_params);
-
-    SAMPLER::SAMPLING_PARAMS_T sp{};
-    sp.std_dev[static_cast<int>(DubinsBicycleParams::ControlIndex::ACCEL)] = kNoiseStdAccel;
-    sp.std_dev[static_cast<int>(DubinsBicycleParams::ControlIndex::STEER)] = kNoiseStdSteer;
-    sp.control_cost_coeff[0] = cost_params.control_cost_coeff[0];
-    sp.control_cost_coeff[1] = cost_params.control_cost_coeff[1];
-    sp.sum_strides = std::max(32, (kNumRollouts + 1023) / 1024);
-    SAMPLER sampler(sp);
 
     FB feedback(&model, kDt);
     Mppi::control_trajectory u_nom = Mppi::control_trajectory::Zero();
