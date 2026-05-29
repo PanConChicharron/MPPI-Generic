@@ -52,6 +52,30 @@ void clipControl(const DubinsBicycleParams& p, DYN::control_array& u)
       std::max(-p.max_steer_angle, std::min(u(static_cast<int>(DubinsBicycleParams::ControlIndex::STEER)), p.max_steer_angle));
 }
 
+void writeCenterlineCsv(const mppi::path::Path2D& path, const std::string& log_csv_path)
+{
+  std::string out = log_csv_path;
+  const size_t n = out.size();
+  if (n > 4U && out.compare(n - 4U, 4U, ".csv") == 0)
+  {
+    out.insert(n - 4U, "_centerline");
+  }
+  else
+  {
+    out += "_centerline.csv";
+  }
+  std::ofstream f(out.c_str());
+  if (!f)
+  {
+    return;
+  }
+  f << "x_m,y_m\n";
+  for (const mppi::path::PathAnchor& a : path.anchors())
+  {
+    f << a.x << "," << a.y << "\n";
+  }
+  std::cout << "Wrote centerline for plot: " << out << "\n";
+}
 }  // namespace
 
 int main(int argc, char** argv)
@@ -66,7 +90,7 @@ int main(int argc, char** argv)
   }
 
   const mppi::path::Path2D path = mppi::path::Path2D::straightLine(0.0F, 0.0F, 100.0F, 0.0F, 64);
-  mppi::rollout_csv::writeCenterlineForLog(path, log_path);
+  writeCenterlineCsv(path, log_path);
 
   mppi::path::PathReferenceGenerator ref_gen(kDt);
   ref_gen.setSpeedCap(kVMax);
@@ -95,10 +119,7 @@ int main(int argc, char** argv)
 
   FB feedback(&model, kDt);
   Mppi::control_trajectory u_nom = Mppi::control_trajectory::Zero();
-  // See dubins_circle_path_tracking_example.cu for the lambda tuning rationale; the cost weights
-  // and per-step magnitudes are the same here, so the same temperature lands in the healthy band.
-  constexpr float kMppiLambda = 100.0F;
-  Mppi controller(&model, &cost, &feedback, &sampler, kDt, 1, kMppiLambda, 0.0F, kMppiHorizon, u_nom);
+  Mppi controller(&model, &cost, &feedback, &sampler, kDt, 1, 0.3F, 0.0F, kMppiHorizon, u_nom);
   {
     auto cp = controller.getParams();
     cp.dynamics_rollout_dim_ = dim3(32, 2, 1);

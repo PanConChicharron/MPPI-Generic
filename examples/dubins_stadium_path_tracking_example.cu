@@ -34,10 +34,10 @@ namespace
   constexpr int kMppiHorizon = 50;
   constexpr int kRefHorizon = kMppiHorizon + 8;
   constexpr float kDt = 0.1F;
-  constexpr int kNumRollouts = 32;
+  constexpr int kNumRollouts = 64;
   constexpr float kTargetSpeed = 2.5F;
   constexpr float kVMax = 3.0F;
-  constexpr float kSimLaps = 2.5F;
+  constexpr size_t kSimSteps = 100;
   
   constexpr float kStraightLength = 40.0F;
   constexpr float kTurnRadius = 10.0F;
@@ -47,14 +47,14 @@ namespace
   // so MPPI sees the curvature step around step 8 of the horizon - the bend lives in the middle of
   // the prediction window where the rollouts have spread enough to be informative.
   constexpr float kInitArcLength = kStraightLength - 2.0F;
-  constexpr float kInitLateralOffset = 0.1F;
+  constexpr float kInitLateralOffset = 0.0F;
   
   // Zero lateral/heading nominal feedback; curvature feedforward only in u_nom (see fillNominalControlFromReference).
   constexpr float kNoiseStdAccel = 0.15F;
   constexpr float kNoiseStdSteer = 0.12F;
   constexpr float kNomLatSteerGain = 0.0F;
   constexpr float kNomHeadingSteerGain = 0.0F;
-  constexpr float kLambda = 3.F;
+  constexpr float kLambda = 30.0F;
   constexpr float kAlpha = 1.0F;
   
   using DYN = DubinsBicycle;
@@ -99,7 +99,6 @@ int main(int argc, char** argv)
     std::string log_path = "dubins_stadium_path_tracking_log.csv";
 
     const mppi::path::Path2D path = mppi::path::Path2D::stadium(kStraightLength, kTurnRadius, kSamplesPerArc);
-    const int kSimSteps = simStepsForLaps(path, kSimLaps);
     mppi::rollout_csv::writeCenterlineForLog(path, log_path);
 
     mppi::path::PathReferenceGenerator ref_gen(kDt);
@@ -131,23 +130,11 @@ int main(int argc, char** argv)
 
     FB feedback(&model, kDt);
     Mppi::control_trajectory u_nom = Mppi::control_trajectory::Zero();
-    Mppi controller(&model, &cost, &feedback, &sampler, kDt, 1, kLambda, kAlpha, kMppiHorizon, u_nom);
-    // Needed for dump diagnostics that compare GPU rollout outputs against host replay.
-    controller.setPercentageSampledControlTrajectories(1.0F);
-    {
-      auto cp = controller.getParams();
-      cp.dynamics_rollout_dim_ = dim3(32, 2, 1);
-      // Split rolloutCostKernel uses COALESCE loads: thread t must use y_shared[t], which requires
-      // blockDim.x >= num_timesteps (see mppi_common rolloutCostKernel). Horizon 50 + block 32 mis-associates y.
-      cp.cost_rollout_dim_ = dim3(kMppiHorizon, 1, 1);
-      cp.seed_ = 42U;
-      controller.setParams(cp);
-    }
-    // PathTrackingCost has a large device params blob; the combined rollout kernel mis-aligns
-    // shared memory (illegal memory access). Use split kernels for the optimization itself.
-    controller.setKernelChoice(kernelType::USE_SPLIT_KERNELS);
-    model.GPUSetup();
-    cost.GPUSetup();
+    Mppi controller(&model, &cost, &feedback, &sampler, kDt, 1, kLambda, kAlpha, kMppiHorizon);
+    auto controller_params = controller.getParams();
+    controller_params.dynamics_rollout_dim_ = dim3(64, 4, 1);
+    controller_params.cost_rollout_dim_ = dim3(64, 4, 1);
+    controller.setParams(controller_params);
 
     DYN::state_array x = model.getZeroState();
     const mppi::path::Pose2D p0 = path.poseAt(kInitArcLength);
@@ -184,6 +171,10 @@ int main(int argc, char** argv)
     std::vector<std::string> deviation_times;
     std::vector<std::string> mppi_analysis_prefixes;
 
+    DYN::state_array x_next = model.getZeroState();
+    DYN::state_array xdot = model.getZeroState();
+    DYN::output_array y = DYN::output_array::Zero();
+
     for (size_t k = 0; k < static_cast<size_t>(kSimSteps); ++k) {
       const float px = x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_X));
       const float py = x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_Y));
@@ -194,8 +185,10 @@ int main(int argc, char** argv)
       const bool entering_off_track = off_track && !was_off_track;
       was_off_track = off_track;
       const float along_v = mppi::path::alongPathSpeedFromState(path, arcLength, x, &proj_pre.signed_lateral_error);
+
       const std::vector<mppi::path::PathReferenceSample> ref =
           ref_gen.generate(path, arcLength, kRefHorizon, along_v);
+      
       mppi::path::fillCostFromPathReference<kRefHorizon>(cost_params, ref, &path, &dyn);
       cost.setParams(cost_params);
       mppi::path::fillNominalControlFromReference(u_nom, x, ref, dyn, kDt, &path, kNomLatSteerGain, kNomHeadingSteerGain);
@@ -227,14 +220,10 @@ int main(int argc, char** argv)
 
       Mppi::control_trajectory u_opt = controller.getControlSeq();
 
-      DYN::state_array x_next = model.getZeroState();
-      DYN::state_array xdot = model.getZeroState();
-      DYN::output_array y = DYN::output_array::Zero();
-
-      model.enforceConstraints(x, u_opt.col(0));
-      model.step(x, x_next, xdot, u_opt.col(0), y, static_cast<float>(k), kDt);
-
+      model.enforceConstraints(x, u_opt.block(0, 0, DYN::CONTROL_DIM, 1));
+      model.step(x, x_next, xdot, u_opt.block(0, 0, DYN::CONTROL_DIM, 1), y, static_cast<float>(k), kDt);
       x = x_next;
+
       controller.slideControlSequence(1);
 
       const mppi::path::PathProjection proj = mppi::path::projectPoseOntoPath(path, x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_X)), x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_Y)), arcLength);
@@ -261,6 +250,21 @@ int main(int argc, char** argv)
           << ref_gen.speedAt(path, proj.arc_length_s) << ","
           << proj.arc_length_s << "," << proj.signed_lateral_error << ","
           << static_cast<float>(controller.getBaselineCost()) << "\n";
+      
+      std::cout << "t_end: " << t_end << ","
+      << "x: " << x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_X)) << ","
+      << "y: " << x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_Y)) << ","
+      << "yaw: " << x(static_cast<int>(DubinsBicycleParams::StateIndex::YAW)) << ","
+      << "vel_x: " << x(static_cast<int>(DubinsBicycleParams::StateIndex::VEL_X)) << ","
+      << "steer_angle: " << x(static_cast<int>(DubinsBicycleParams::StateIndex::STEER_ANGLE)) << ",0,"
+      << "u_accel: " << u_opt.col(0)(static_cast<int>(DubinsBicycleParams::ControlIndex::ACCEL)) << ","
+      << "u_steer: " << u_opt.col(0)(static_cast<int>(DubinsBicycleParams::ControlIndex::STEER)) << ","
+      << "nom_u_accel: " << u_nom_step(static_cast<int>(DubinsBicycleParams::ControlIndex::ACCEL)) << ","
+      << "nom_u_steer: " << u_nom_step(static_cast<int>(DubinsBicycleParams::ControlIndex::STEER)) << ","
+      << "ref_x: " << ref_at_s.x << "," << "ref_y: " << ref_at_s.y << "," << "ref_yaw: " << ref_at_s.yaw << ","
+      << "ref_v: " << ref_gen.speedAt(path, proj.arc_length_s) << ","
+      << "arc_s: " << proj.arc_length_s << "," << "lat_err: " << proj.signed_lateral_error << ","
+      << "baseline: " << static_cast<float>(controller.getBaselineCost()) << "\n";
     }
 
     log.close();
