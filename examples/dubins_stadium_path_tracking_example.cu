@@ -28,7 +28,7 @@
 namespace
 {
   constexpr int kMppiHorizon = 50;
-  constexpr int kRefHorizon = kMppiHorizon + 8;
+  constexpr int kRefHorizon = kMppiHorizon;
   constexpr float kDt = 0.1F;
   constexpr int kNumRollouts = 64;
   constexpr float kTargetSpeed = 2.5F;
@@ -78,12 +78,13 @@ int main(int argc, char** argv)
 
     DYN model;
     DubinsBicycleParams dyn;
+    std::cout << "Section 0\n";
     model.setParams(dyn);
     std::array<float2, DYN::CONTROL_DIM> u_rng{};
     u_rng[static_cast<int>(DubinsBicycleParams::ControlIndex::ACCEL)] = { dyn.min_accel, dyn.max_accel };
     u_rng[static_cast<int>(DubinsBicycleParams::ControlIndex::STEER)] = { -dyn.max_steer_angle, dyn.max_steer_angle };
     model.setControlRanges(u_rng);
-
+    std::cout << "Section 1\n";
     COST cost;
     PathTrackingCostParams<kRefHorizon> cost_params;
     // Order: w_pos, w_heading_so2, w_vel, w_lat_accel, w_lat_jerk, w_steer_dot, w_accel, w_steer.
@@ -91,42 +92,45 @@ int main(int argc, char** argv)
     mppi::path::fillPathTrackingCostWeights<kRefHorizon>(cost_params, 20.0F, 3.0F, 5.0F, 1.0F, 0.05F, 0.0F, 0.05F, 0.05F);
     mppi::path::fillPathTrackingBicycleGeometry<kRefHorizon>(cost_params, dyn);
     cost.setParams(cost_params);
-
+    std::cout << "Section 2\n";
     SAMPLER::SAMPLING_PARAMS_T sp{};
     sp.std_dev[static_cast<int>(DubinsBicycleParams::ControlIndex::ACCEL)] = kNoiseStdAccel;
     sp.std_dev[static_cast<int>(DubinsBicycleParams::ControlIndex::STEER)] = kNoiseStdSteer;
     SAMPLER sampler(sp);
-
+    std::cout << "Section 3\n";
     FB feedback(&model, kDt);
     Mppi::control_trajectory u_nom = Mppi::control_trajectory::Zero();
     Mppi controller(&model, &cost, &feedback, &sampler, kDt, 1, kLambda, 0.0F, kMppiHorizon, u_nom);
+    std::cout << "Section 4\n";
     {
       auto cp = controller.getParams();
       cp.dynamics_rollout_dim_ = dim3(64, 1, 1);
       cp.cost_rollout_dim_ = dim3(64, 1, 1);
       controller.setParams(cp);
     }
-
+    std::cout << "Section 5\n";
 
     DYN::state_array x = model.getZeroState();
     const mppi::path::Pose2D p0 = path.poseAt(kInitArcLength);
+    std::cout << "Section 6\n";
     float init_x = p0.x;
     float init_y = p0.y;
     mppi::path::applyInitialLateralOffset(path, kInitArcLength, kInitLateralOffset, init_x, init_y);
+    std::cout << "Section 7\n";
     x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_X)) = init_x;
     x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_Y)) = init_y;
     x(static_cast<int>(DubinsBicycleParams::StateIndex::YAW)) = p0.yaw;
     x(static_cast<int>(DubinsBicycleParams::StateIndex::VEL_X)) = kTargetSpeed;
     x(static_cast<int>(DubinsBicycleParams::StateIndex::STEER_ANGLE)) =
         std::atan(dyn.wheel_base * path.curvatureAt(kInitArcLength));
-
+    std::cout << "Section 8\n";
     std::vector<DYN::state_array> x_history;
     std::vector<DYN::control_array> u_history;
     std::vector<DYN::output_array> y_history;
     x_history.reserve(kSimSteps);
     u_history.reserve(kSimSteps);
     y_history.reserve(kSimSteps);
-
+    std::cout << "Section 9\n";
     std::ofstream log(log_path.c_str());
     if (!log) {
       std::cerr << "Could not open log: " << log_path << "\n";
@@ -135,63 +139,63 @@ int main(int argc, char** argv)
     log << "t,pos_x,pos_y,yaw,vel_x,steer_angle,brake_state,u_accel,u_steer,nom_u_accel,nom_u_steer,"
            "ref_x,ref_y,ref_yaw,ref_v,arc_s,lat_err,baseline\n";
     log << std::scientific;
-
+    std::cout << "Section 10\n";
     float arcLength = kInitArcLength;
 
     for (size_t k = 0; k < static_cast<size_t>(kSimSteps); ++k) {
-      std::cout << "Section 1\n";
+      std::cout << "Section 11\n";
       const float px = x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_X));
       const float py = x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_Y));
 
-      std::cout << "Section 2\n";
+      std::cout << "Section 12\n";
       const mppi::path::PathProjection proj_pre =
           mppi::path::projectPoseOntoPath(path, px, py, arcLength);
       arcLength = proj_pre.arc_length_s;
       const float along_v = mppi::path::alongPathSpeedFromState(path, arcLength, x, &proj_pre.signed_lateral_error);
 
-      std::cout << "Section 3\n";
+      std::cout << "Section 13\n";
       const std::vector<mppi::path::PathReferenceSample> ref =
           ref_gen.generate(path, arcLength, kRefHorizon, along_v);
 
-      std::cout << "Section 4\n";
+      std::cout << "Section 14\n";
       mppi::path::fillCostFromPathReference<kRefHorizon>(cost_params, ref, &path, &dyn);
       cost.setParams(cost_params);
       mppi::path::fillNominalControlFromReference(u_nom, x, ref, dyn, kDt, &path, kNomLatSteerGain, kNomHeadingSteerGain);
       controller.updateImportanceSampler(u_nom);
       const DYN::control_array u_nom_step = u_nom.col(0);
 
-      std::cout << "Section 5\n";
+      std::cout << "Section 15\n";
       controller.computeControl(x, 1);
-      std::cout << "Section 5.1\n";
+      std::cout << "Section 16\n";
       Mppi::control_trajectory u_opt = controller.getControlSeq();
 
-      std::cout << "Section 6\n";
+      std::cout << "Section 17\n";
       DYN::state_array x_next = model.getZeroState();
       DYN::state_array xdot = model.getZeroState();
       DYN::output_array y = DYN::output_array::Zero();
 
-      std::cout << "Section 7\n";
+      std::cout << "Section 18\n";
       model.enforceConstraints(x, u_opt.block(0, 0, DYN::CONTROL_DIM, 1));
       model.step(x, x_next, xdot, u_opt.block(0, 0, DYN::CONTROL_DIM, 1), y, static_cast<float>(k), kDt);
       x = x_next;
 
-      std::cout << "Section 8\n";
+      std::cout << "Section 19\n";
       controller.slideControlSequence(1);
 
-      std::cout << "Section 9\n";
+      std::cout << "Section 20\n";
       const mppi::path::PathProjection proj = mppi::path::projectPoseOntoPath(path, x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_X)), x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_Y)), arcLength);
       arcLength = proj.arc_length_s;
 
-      std::cout << "Section 10\n";
+      std::cout << "Section 21\n";
       x_history.push_back(x);
       u_history.push_back(u_opt.col(0));
       y_history.push_back(y);
 
-      std::cout << "Section 11\n";
+      std::cout << "Section 22\n";
       const mppi::path::Pose2D ref_at_s = path.poseAt(proj.arc_length_s);
       const float t_end = static_cast<float>(k + 1) * kDt;
 
-      std::cout << "Section 12\n";
+      std::cout << "Section 23\n";
       log << t_end << ","
           << x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_X)) << ","
           << x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_Y)) << ","
@@ -207,6 +211,7 @@ int main(int argc, char** argv)
           << proj.arc_length_s << "," << proj.signed_lateral_error << ","
           << static_cast<float>(controller.getBaselineCost()) << "\n";
       
+      std::cout << "Section 24\n";
       std::cout << "t_end: " << t_end << ","
                 << "x: " << x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_X)) << ","
                 << "y: " << x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_Y)) << ","

@@ -140,7 +140,7 @@ inline void fillNominalControlFromReference(ControlTrajectory& u_seq,
   using S = DubinsBicycleParams::StateIndex;
   using C = DubinsBicycleParams::ControlIndex;
 
-  const int horizon = std::min(static_cast<int>(ref.size()), static_cast<int>(u_seq.cols()));
+  const int horizon = static_cast<int>(ref.size());
   float v_nom = x(static_cast<int>(S::VEL_X));
   float yaw_nom = x(static_cast<int>(S::YAW));
   float px_nom = x(static_cast<int>(S::POS_X));
