@@ -25,7 +25,7 @@ namespace
   constexpr int kMppiHorizon = 50;
   constexpr int kRefHorizon = kMppiHorizon;
   constexpr float kDt = 0.1F;
-  constexpr int kNumRollouts = 8*1024;
+  constexpr int kNumRollouts = 4*1024;
   constexpr float kTargetSpeed = 2.5F;
   constexpr float kVMax = 3.0F;
   constexpr size_t kSimLaps = 1;
@@ -49,7 +49,10 @@ namespace
     float speed_coeff = 20.0F;
     float track_coeff = 500.0F;
     float crash_coeff = 10000.0F;
-    float boundary_threshold = 0.5F;
+    float boundary_threshold = 0.8F;
+    
+    // Coefficient to penalize large steering commands
+    float steer_coeff = 50.0F; 
     
     float3 r_c1 = make_float3(1, 0, 0);
     float3 r_c2 = make_float3(0, 1, 0);
@@ -66,6 +69,7 @@ namespace
   public:
     using PARENT_CLASS = ::Cost<CLASS_T, PARAMS_T, DYN_PARAMS_T>;
     using output_array = typename PARENT_CLASS::output_array;
+    using control_array = typename PARENT_CLASS::control_array;
 
     RacerCostImpl(cudaStream_t stream = 0) {
         this->bindToStream(stream);
@@ -147,6 +151,21 @@ namespace
         }
 
         return speed_cost + track_cost + crash_cost;
+    }
+
+    // GPU Implementation
+    __device__ float computeControlCost(float* u, int timestep, float* theta_c, int* crash) {
+        // Extract the steering command from the control array
+        float steer = u[static_cast<int>(RacerDubinsParams::ControlIndex::STEER_CMD)];
+        
+        // Return a quadratic penalty based on the magnitude of the steering command
+        return this->params_.steer_coeff * (steer * steer);
+    }
+
+    // CPU Implementation (Required by CRTP to match the base class signature)
+    float computeControlCost(const Eigen::Ref<const control_array> u, int timestep, int* crash) {
+        float steer = u(static_cast<int>(RacerDubinsParams::ControlIndex::STEER_CMD));
+        return this->params_.steer_coeff * (steer * steer);
     }
 
     __device__ float terminalCost(float* y, float* theta_c) {
@@ -350,13 +369,26 @@ int main(int argc, char** argv)
     };
     
     // Draw road (cost 0.0)
+    // 1. Draw a 1-pixel thin centerline on a blank binary image (White background, Black line)
+    cv::Mat center_img = cv::Mat::ones(height, width, CV_8UC1) * 255;
     const auto& anchors = path.anchors();
     for (size_t i = 0; i < anchors.size() - 1; ++i) {
-        cv::line(costmap_img, worldToMap(anchors[i].x, anchors[i].y), 
-                 worldToMap(anchors[i+1].x, anchors[i+1].y), cv::Scalar(0.0), 40);
+        cv::line(center_img, worldToMap(anchors[i].x, anchors[i].y), 
+                 worldToMap(anchors[i+1].x, anchors[i+1].y), cv::Scalar(0), 1);
     }
 
-    cv::GaussianBlur(costmap_img, costmap_img, cv::Size(21, 21), 5.0);
+    // 2. Compute Distance Transform (Distance from every pixel to the black centerline)
+    cv::Mat dist_img;
+    cv::distanceTransform(center_img, dist_img, cv::DIST_L2, 3);
+
+    // 3. Convert distance to a continuous cost gradient
+    // A multiplier of (1.0 / 25.0) means the cost becomes 1.0 when the car is 25 pixels (2.5m) off-center.
+    dist_img.convertTo(costmap_img, CV_32FC1, 1.0 / 25.0);
+
+    // 4. Cap the off-track cost at 0.75. 
+    // (This ensures it is strictly lower than your 0.8F crash threshold, so going off track 
+    // is heavily penalized, but hitting a 1.0 obstacle is correctly recognized as worse).
+    cv::threshold(costmap_img, costmap_img, 0.75, 0.75, cv::THRESH_TRUNC);
     
     // 3. Generate obstacles once
     struct Obstacle { float ox; float oy; float r; };
@@ -364,7 +396,7 @@ int main(int argc, char** argv)
     std::mt19937 gen(seed);
     std::uniform_real_distribution<float> dist_s(0, path.length());
     std::uniform_real_distribution<float> dist_side(-1.0, 1.0);
-    std::uniform_real_distribution<float> dist_r(2.0, 3.5);
+    std::uniform_real_distribution<float> dist_r(2.0, 4.5);
     
     for (int i = 0; i < 15; ++i) {
         float s = dist_s(gen);
@@ -423,7 +455,7 @@ int main(int argc, char** argv)
 
     SAMPLER::SAMPLING_PARAMS_T sp{};
     sp.std_dev[static_cast<int>(RacerDubinsParams::ControlIndex::THROTTLE_BRAKE)] = 0.2F;
-    sp.std_dev[static_cast<int>(RacerDubinsParams::ControlIndex::STEER_CMD)] = 0.6F;
+    sp.std_dev[static_cast<int>(RacerDubinsParams::ControlIndex::STEER_CMD)] = 0.3F;
     sp.sum_strides = std::max(32, (kNumRollouts + 1023) / 1024);
     SAMPLER sampler(sp);
 
