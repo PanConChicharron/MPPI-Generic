@@ -1,16 +1,16 @@
-#include <mppi/cost_functions/racer/racer_cost.cuh>
+#include <mppi/cost_functions/racer/racer_cost_map.cuh>
 
 #include <algorithm>
 #include <cstring>
 
 template <class CLASS_T, class PARAMS_T, class DYN_PARAMS_T>
-RacerCostImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::RacerCostImpl(cudaStream_t stream)
+RacerCostMapImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::RacerCostMapImpl(cudaStream_t stream)
 {
   this->bindToStream(stream);
 }
 
 template <class CLASS_T, class PARAMS_T, class DYN_PARAMS_T>
-void RacerCostImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::freeCudaMem()
+void RacerCostMapImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::freeCudaMem()
 {
   if (this->GPUMemStatus_)
   {
@@ -29,14 +29,14 @@ void RacerCostImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::freeCudaMem()
 }
 
 template <class CLASS_T, class PARAMS_T, class DYN_PARAMS_T>
-void RacerCostImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::paramsToDevice()
+void RacerCostMapImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::paramsToDevice()
 {
   HANDLE_ERROR(cudaMemcpyAsync(&this->cost_d_->params_, &this->params_, sizeof(PARAMS_T), cudaMemcpyHostToDevice,
                                this->stream_));
 }
 
 template <class CLASS_T, class PARAMS_T, class DYN_PARAMS_T>
-void RacerCostImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::setWorldToCostmapBounds(float x_min, float x_max, float y_min,
+void RacerCostMapImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::setWorldToCostmapBounds(float x_min, float x_max, float y_min,
                                                                              float y_max)
 {
   const float inv_x = 1.0F / (x_max - x_min);
@@ -51,7 +51,7 @@ void RacerCostImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::setWorldToCostmapBounds(flo
 }
 
 template <class CLASS_T, class PARAMS_T, class DYN_PARAMS_T>
-__host__ __device__ void RacerCostImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::coorTransform(float x, float y, float* u,
+__host__ __device__ void RacerCostMapImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::coorTransform(float x, float y, float* u,
                                                                                        float* v, float* w) const
 {
   *u = this->params_.r_c1.x * x + this->params_.r_c2.x * y + this->params_.trs.x;
@@ -60,7 +60,7 @@ __host__ __device__ void RacerCostImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::coorTra
 }
 
 template <class CLASS_T, class PARAMS_T, class DYN_PARAMS_T>
-__device__ float4 RacerCostImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::queryTextureTransformed(float x, float y) const
+__device__ float4 RacerCostMapImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::queryTextureTransformed(float x, float y) const
 {
   float u = 0.0F;
   float v = 0.0F;
@@ -70,7 +70,7 @@ __device__ float4 RacerCostImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::queryTextureTr
 }
 
 template <class CLASS_T, class PARAMS_T, class DYN_PARAMS_T>
-__device__ float RacerCostImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::computeStateCost(float* y, int timestep, float* theta_c,
+__device__ float RacerCostMapImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::computeStateCost(float* y, int timestep, float* theta_c,
                                                                                 int* crash_status)
 {
   (void)timestep;
@@ -96,7 +96,7 @@ __device__ float RacerCostImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::computeStateCos
 }
 
 template <class CLASS_T, class PARAMS_T, class DYN_PARAMS_T>
-float RacerCostImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::computeStateCost(const Eigen::Ref<const output_array>& y,
+float RacerCostMapImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::computeStateCost(const Eigen::Ref<const output_array>& y,
                                                                      int timestep, int* crash_status)
 {
   (void)timestep;
@@ -141,7 +141,7 @@ float RacerCostImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::computeStateCost(const Eig
 }
 
 template <class CLASS_T, class PARAMS_T, class DYN_PARAMS_T>
-__device__ float RacerCostImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::computeControlCost(float* u, int timestep, float* theta_c,
+__device__ float RacerCostMapImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::computeControlCost(float* u, int timestep, float* theta_c,
                                                                                   int* crash)
 {
   (void)timestep;
@@ -152,7 +152,7 @@ __device__ float RacerCostImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::computeControlC
 }
 
 template <class CLASS_T, class PARAMS_T, class DYN_PARAMS_T>
-float RacerCostImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::computeControlCost(const Eigen::Ref<const control_array>& u,
+float RacerCostMapImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::computeControlCost(const Eigen::Ref<const control_array>& u,
                                                                          int timestep, int* crash)
 {
   (void)timestep;
@@ -162,7 +162,7 @@ float RacerCostImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::computeControlCost(const E
 }
 
 template <class CLASS_T, class PARAMS_T, class DYN_PARAMS_T>
-__device__ float RacerCostImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::terminalCost(float* y, float* theta_c)
+__device__ float RacerCostMapImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::terminalCost(float* y, float* theta_c)
 {
   (void)theta_c;
   const float x = y[static_cast<int>(RacerDubinsParams::OutputIndex::BASELINK_POS_I_X)];
@@ -172,13 +172,13 @@ __device__ float RacerCostImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::terminalCost(fl
 }
 
 template <class CLASS_T, class PARAMS_T, class DYN_PARAMS_T>
-void RacerCostImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::setCpuCostmap(const cv::Mat& costmap)
+void RacerCostMapImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::setCpuCostmap(const cv::Mat& costmap)
 {
   cpu_costmap_ = costmap;
 }
 
 template <class CLASS_T, class PARAMS_T, class DYN_PARAMS_T>
-void RacerCostImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::costmapToTexture(int width, int height, float4* host_data)
+void RacerCostMapImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::costmapToTexture(int width, int height, float4* host_data)
 {
   width_ = width;
   height_ = height;
@@ -210,7 +210,7 @@ void RacerCostImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::costmapToTexture(int width,
 }
 
 template <class CLASS_T, class PARAMS_T, class DYN_PARAMS_T>
-void RacerCostImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::updateCostmapTexture(float4* host_data)
+void RacerCostMapImpl<CLASS_T, PARAMS_T, DYN_PARAMS_T>::updateCostmapTexture(float4* host_data)
 {
   if (costmapArray_d_ == nullptr)
   {

@@ -3,15 +3,15 @@
  */
 #pragma once
 
-#ifndef MPPI_COST_FUNCTIONS_RACER_COST_CUH_
-#define MPPI_COST_FUNCTIONS_RACER_COST_CUH_
+#ifndef MPPI_COST_FUNCTIONS_RACER_COST_MAP_CUH_
+#define MPPI_COST_FUNCTIONS_RACER_COST_MAP_CUH_
 
 #include <mppi/cost_functions/cost.cuh>
 #include <mppi/dynamics/racer_dubins/racer_dubins.cuh>
 
 #include <opencv2/core.hpp>
 
-struct RacerCostParams : public CostParams<2>
+struct RacerCostMapParams : public CostParams<2>
 {
   float desired_speed = 2.5F;
   float speed_coeff = 20.0F;
@@ -25,15 +25,15 @@ struct RacerCostParams : public CostParams<2>
   float3 trs = make_float3(0, 0, 1);
 };
 
-template <class CLASS_T, class PARAMS_T = RacerCostParams, class DYN_PARAMS_T = RacerDubinsParams>
-class RacerCostImpl : public Cost<CLASS_T, PARAMS_T, DYN_PARAMS_T>
+template <class CLASS_T, class PARAMS_T = RacerCostMapParams, class DYN_PARAMS_T = RacerDubinsParams>
+class RacerCostMapImpl : public Cost<CLASS_T, PARAMS_T, DYN_PARAMS_T>
 {
 public:
   using PARENT_CLASS = Cost<CLASS_T, PARAMS_T, DYN_PARAMS_T>;
   using output_array = typename PARENT_CLASS::output_array;
   using control_array = typename PARENT_CLASS::control_array;
 
-  RacerCostImpl(cudaStream_t stream = 0);
+  RacerCostMapImpl(cudaStream_t stream = 0);
 
   void freeCudaMem();
 
@@ -70,16 +70,16 @@ public:
   cv::Mat cpu_costmap_;
 };
 
-class RacerCost : public RacerCostImpl<RacerCost>
+class RacerCostMap : public RacerCostMapImpl<RacerCostMap>
 {
 public:
-  RacerCost(cudaStream_t stream = 0) : RacerCostImpl<RacerCost>(stream)
+  RacerCostMap(cudaStream_t stream = 0) : RacerCostMapImpl<RacerCostMap>(stream)
   {
   }
 };
 
 #if __CUDACC__
-#include "racer_cost.cu"
+#include "racer_cost_map.cu"
 #endif
 
-#endif  // MPPI_COST_FUNCTIONS_RACER_COST_CUH_
+#endif  // MPPI_COST_FUNCTIONS_RACER_COST_MAP_CUH_

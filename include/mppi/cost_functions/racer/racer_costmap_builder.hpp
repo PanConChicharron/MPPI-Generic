@@ -1,5 +1,5 @@
 /**
- * Host-side helpers to build OpenCV costmaps for RacerCost.
+ * Host-side helpers to build OpenCV costmaps for RacerCostMap.
  */
 #pragma once
 
