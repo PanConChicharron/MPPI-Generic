@@ -553,7 +553,7 @@ __global__ void visualizeCostKernel(COST_T* __restrict__ costs, SAMPLING_T* __re
   float* y_shared = entire_buffer;
   float* u_shared = &y_shared[math::nearest_multiple_4(blockDim.x * blockDim.z * COST_T::OUTPUT_DIM)];
   float* running_cost_shared = &u_shared[math::nearest_multiple_4(blockDim.x * blockDim.z * COST_T::CONTROL_DIM)];
-  int* crash_status_shared = (int*)&running_cost_shared[math::nearest_multiple_4(blockDim.y * blockDim.z * blockDim.z)];
+  int* crash_status_shared = (int*)&running_cost_shared[math::nearest_multiple_4(blockDim.x * blockDim.y * blockDim.z)];
   float* theta_c = (float*)&crash_status_shared[math::nearest_multiple_4(blockDim.x * blockDim.z)];
   float* theta_d = &theta_c[size_of_theta_c_bytes / sizeof(float)];
 #ifdef USE_CUDA_BARRIERS_COST
@@ -566,10 +566,10 @@ __global__ void visualizeCostKernel(COST_T* __restrict__ costs, SAMPLING_T* __re
   int* crash_status;
 
   // Initialize running cost and total cost
-  float* running_cost;
   int sample_time_offset = 0;
   int cost_index = 0;
-  int r_cost_index = blockDim.x * blockDim.y * thread_idz + thread_idx;
+  const int r_cost_index = blockDim.x * blockDim.y * thread_idz + thread_idx;
+  float* running_cost = &running_cost_shared[r_cost_index + blockDim.x * thread_idy];
 
   // Load global array to shared array
   y = &y_shared[shared_idx * COST_T::OUTPUT_DIM];
@@ -597,7 +597,6 @@ __global__ void visualizeCostKernel(COST_T* __restrict__ costs, SAMPLING_T* __re
   {
     int t = thread_idx + time_iter * blockDim.x;
     cost_index = (thread_idz * num_rollouts + global_idx) * (num_timesteps + 1) + t;
-    running_cost = &running_cost_shared[r_cost_index + blockDim.x * thread_idy];
     if (COALESCE)
     {  // Fill entire shared mem sequentially using sequential threads_idx
       int amount_to_fill = (time_iter + 1) * blockDim.x > num_timesteps ? num_timesteps % blockDim.x : blockDim.x;

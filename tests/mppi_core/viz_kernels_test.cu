@@ -132,60 +132,63 @@ protected:
 
 TEST_F(VizualizationKernelsTest, visualizeCostKernelTest)
 {
-  for (int s = 0; s < num_rollouts; ++s)
+  for (int parallel_y_threads = 1; parallel_y_threads < 10; parallel_y_threads++)
   {
-    outputs[s] = output_trajectory::Random();
-  }
-
-  HANDLE_ERROR(cudaMemcpyAsync(outputs_d, outputs.data(),
-                               sizeof(float) * num_rollouts * MAX_TIMESTEPS * DYN_T::OUTPUT_DIM, cudaMemcpyHostToDevice,
-                               stream));
-
-  // Launch VisualizeCostKernel
-  dim3 thread_block;
-  thread_block.x = 10;
-  thread_block.y = 1;
-  thread_block.z = 1;
-  mppi::kernels::launchVisualizeCostKernel<COST_T, SAMPLER_T>(&cost, &sampler, dt, MAX_TIMESTEPS, num_rollouts, lambda,
-                                                              alpha, outputs_d, crash_status_d, trajectory_costs_d,
-                                                              thread_block, stream, false);
-  for (int s = 0; s < num_rollouts; ++s)
-  {
-    HANDLE_ERROR(cudaMemcpyAsync(trajectory_costs_gpu[s].data(), &trajectory_costs_d[s * (MAX_TIMESTEPS + 1)],
-                                 sizeof(float) * (MAX_TIMESTEPS + 1), cudaMemcpyDeviceToHost, stream));
-  }
-  HANDLE_ERROR(cudaStreamSynchronize(stream));
-
-  // Calculate costs on CPU
-  DYN_T::output_array curr_output;
-  DYN_T::control_array curr_control;
-  float cost_t = 0.0f;
-  for (int s = 0; s < num_rollouts; ++s)
-  {
-    curr_output = outputs[s].col(0);
-    HANDLE_ERROR(cudaMemcpyAsync(curr_control.data(), sampler.getVisControlSample(s, 0, 0),
-                                 sizeof(float) * DYN_T::CONTROL_DIM, cudaMemcpyDeviceToHost, stream));
-    HANDLE_ERROR(cudaStreamSynchronize(stream));
-    cost.initializeCosts(curr_output, curr_control, 0, dt);
-    for (int t = 0; t < MAX_TIMESTEPS; ++t)
+    for (int s = 0; s < num_rollouts; ++s)
     {
-      curr_output = outputs[s].col(t);
-      HANDLE_ERROR(cudaMemcpyAsync(curr_control.data(), sampler.getVisControlSample(s, t, 0),
-                                   sizeof(float) * DYN_T::CONTROL_DIM, cudaMemcpyDeviceToHost, stream));
-      HANDLE_ERROR(cudaStreamSynchronize(stream));
-      cost_t = cost.computeRunningCost(curr_output, curr_control, t, &crash_status[s](t, 0)) +
-               sampler.computeLikelihoodRatioCost(curr_control, s, t, 0, lambda, alpha);
-      cost_t /= MAX_TIMESTEPS;
-      ASSERT_FLOAT_EQ(cost_t, trajectory_costs_gpu[s](t, 0))
-          << "CPU s = " << s << ", t = " << t << ":\nCPU output: " << curr_output.transpose()
-          << "\nCPU control: " << curr_control.transpose() << std::endl;
+      outputs[s] = output_trajectory::Random();
     }
 
-    // TODO Check terminal cost
-    cost_t = cost.terminalCost(curr_output) / MAX_TIMESTEPS;
-    ASSERT_FLOAT_EQ(cost_t, trajectory_costs_gpu[s](MAX_TIMESTEPS, 0))
-        << "CPU s = " << s << ", terminal_cost: "
-        << ":\nCPU output: " << curr_output.transpose() << "\nCPU control: " << curr_control.transpose() << std::endl;
+    HANDLE_ERROR(cudaMemcpyAsync(outputs_d, outputs.data(),
+                                 sizeof(float) * num_rollouts * MAX_TIMESTEPS * DYN_T::OUTPUT_DIM,
+                                 cudaMemcpyHostToDevice, stream));
+
+    // Launch VisualizeCostKernel
+    dim3 thread_block;
+    thread_block.x = 10;
+    thread_block.y = parallel_y_threads;
+    thread_block.z = 1;
+    mppi::kernels::launchVisualizeCostKernel<COST_T, SAMPLER_T>(&cost, &sampler, dt, MAX_TIMESTEPS, num_rollouts,
+                                                                lambda, alpha, outputs_d, crash_status_d,
+                                                                trajectory_costs_d, thread_block, stream, false);
+    for (int s = 0; s < num_rollouts; ++s)
+    {
+      HANDLE_ERROR(cudaMemcpyAsync(trajectory_costs_gpu[s].data(), &trajectory_costs_d[s * (MAX_TIMESTEPS + 1)],
+                                   sizeof(float) * (MAX_TIMESTEPS + 1), cudaMemcpyDeviceToHost, stream));
+    }
+    HANDLE_ERROR(cudaStreamSynchronize(stream));
+
+    // Calculate costs on CPU
+    DYN_T::output_array curr_output;
+    DYN_T::control_array curr_control;
+    float cost_t = 0.0f;
+    for (int s = 0; s < num_rollouts; ++s)
+    {
+      curr_output = outputs[s].col(0);
+      HANDLE_ERROR(cudaMemcpyAsync(curr_control.data(), sampler.getVisControlSample(s, 0, 0),
+                                   sizeof(float) * DYN_T::CONTROL_DIM, cudaMemcpyDeviceToHost, stream));
+      HANDLE_ERROR(cudaStreamSynchronize(stream));
+      cost.initializeCosts(curr_output, curr_control, 0, dt);
+      for (int t = 0; t < MAX_TIMESTEPS; ++t)
+      {
+        curr_output = outputs[s].col(t);
+        HANDLE_ERROR(cudaMemcpyAsync(curr_control.data(), sampler.getVisControlSample(s, t, 0),
+                                     sizeof(float) * DYN_T::CONTROL_DIM, cudaMemcpyDeviceToHost, stream));
+        HANDLE_ERROR(cudaStreamSynchronize(stream));
+        cost_t = cost.computeRunningCost(curr_output, curr_control, t, &crash_status[s](t, 0)) +
+                 sampler.computeLikelihoodRatioCost(curr_control, s, t, 0, lambda, alpha);
+        cost_t /= MAX_TIMESTEPS;
+        ASSERT_FLOAT_EQ(cost_t, trajectory_costs_gpu[s](t, 0))
+            << "CPU num y threads: " << parallel_y_threads << " s = " << s << ", t = " << t
+            << ":\nCPU output: " << curr_output.transpose() << "\nCPU control: " << curr_control.transpose()
+            << std::endl;
+      }
+
+      cost_t = cost.terminalCost(curr_output) / MAX_TIMESTEPS;
+      ASSERT_FLOAT_EQ(cost_t, trajectory_costs_gpu[s](MAX_TIMESTEPS, 0))
+          << "CPU s = " << s << ", terminal_cost: "
+          << ":\nCPU output: " << curr_output.transpose() << "\nCPU control: " << curr_control.transpose() << std::endl;
+    }
   }
 }
 
