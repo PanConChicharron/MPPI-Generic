@@ -137,7 +137,7 @@ int main(int argc, char** argv)
 
     SAMPLER::SAMPLING_PARAMS_T sp{};
     sp.std_dev[static_cast<int>(RacerDubinsParams::ControlIndex::THROTTLE_BRAKE)] = 0.2F;
-    sp.std_dev[static_cast<int>(RacerDubinsParams::ControlIndex::STEER_CMD)] = 0.1F;
+    sp.std_dev[static_cast<int>(RacerDubinsParams::ControlIndex::STEER_CMD)] = 0.3F;
     sp.sum_strides = std::max(32, (kNumRollouts + 1023) / 1024);
     SAMPLER sampler(sp);
 
