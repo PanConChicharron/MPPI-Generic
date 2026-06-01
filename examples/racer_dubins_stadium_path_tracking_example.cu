@@ -92,21 +92,11 @@ int main(int argc, char** argv)
     const mppi::path::Path2D path = mppi::path::Path2D::stadium(kStraightLength, kTurnRadius, kSamplesPerArc);
     mppi::rollout_csv::writeCenterlineForLog(path, log_path);
 
-    std::vector<mppi::cost::RacerCostObstacle> obstacles;
-    std::mt19937 gen(seed);
-    std::uniform_real_distribution<float> dist_s(0, path.length());
-    std::uniform_real_distribution<float> dist_side(-1.0, 1.0);
-    std::uniform_real_distribution<float> dist_r(2.0, 4.5);
-    
-    for (int i = 0; i < 15; ++i) {
-        float s = dist_s(gen);
-        float side = (dist_side(gen) > 0 ? 1.0 : -1.0) * 2.5; 
-        float r = dist_r(gen);
-        auto p = path.poseAt(s);
-        float tx, ty;
-        path.tangentAt(s, tx, ty);
-        // obstacles.emplace_back(p.x - side * ty, p.y + side * tx, r);
-    }
+    // Parked cars along both shoulders (near road boundary), alternating L/R with gaps for weaving.
+    constexpr float kRoadHalfWidth = 0.8F;
+    const std::vector<mppi::cost::ParkedCarObstacle> parked_cars =
+        mppi::cost::generateParkedCarsAlongRoad(path, kRoadHalfWidth, seed);
+    std::cout << "Parked cars along track: " << parked_cars.size() << "\n";
 
     mppi::path::PathReferenceGenerator ref_gen(kDt);
     ref_gen.setSpeedCap(kVMax);
@@ -131,8 +121,12 @@ int main(int argc, char** argv)
     // Keep curvature/jerk comfort terms consistent with the active vehicle model.
     cost_params.wheel_base = dyn.wheel_base;
     cost_params.steer_angle_scale = dyn.steer_angle_scale;
+    cost_params.boundary_threshold = kRoadHalfWidth;
+    constexpr float kEgoLength = 0.55F * 1.5F;
+    constexpr float kEgoWidth = 0.28F * 1.5F;
+    mppi::cost::setRacerCostEgoFootprint(cost_params, dyn.wheel_base, kEgoLength, kEgoWidth);
     cost.setParams(cost_params);
-    mppi::cost::fillRacerCostObstacles<kRefHorizon>(cost, obstacles);
+    mppi::cost::fillRacerCostParkedCars<kRefHorizon>(cost, parked_cars);
 
     std::array<float2, DYN::CONTROL_DIM> u_rng{};
     u_rng[static_cast<int>(RacerDubinsParams::ControlIndex::THROTTLE_BRAKE)] = { -1.0f, 1.0f };
@@ -177,11 +171,9 @@ int main(int argc, char** argv)
 
     // 8. Prepare visualization
     cv::Mat base_frame = mppi::viz::makeWhiteFrame(1024, 1024);
-    mppi::viz::drawRoadBoundaries(base_frame, path, cost_params.boundary_threshold);
+    mppi::viz::drawRoadBoundaries(base_frame, path, kRoadHalfWidth);
     mppi::viz::drawCenterline(base_frame, path);
-    for (const auto& obs : obstacles) {
-        cv::circle(base_frame, mppi::viz::worldToPixel(obs.ox, obs.oy, 1024, 1024), obs.r * 15.0f, cv::Scalar(0, 0, 255), -1);
-    }
+    mppi::viz::drawParkedCars(base_frame, parked_cars);
 
     cv::VideoWriter video(video_path, 
                       cv::VideoWriter::fourcc('m','p','4','v'), 
@@ -242,6 +234,11 @@ int main(int argc, char** argv)
       mppi::viz::drawSampledTrajectories(frame, sampled_trajectories, output_x_idx, output_y_idx, kMppiHorizon,
                                          rollout_costs);
       mppi::viz::drawTrajectory(frame, state_trajectory, state_x_idx, state_y_idx);
+      mppi::viz::drawEgoVehicleAtRearAxle(
+          frame, x(static_cast<int>(RacerDubinsParams::StateIndex::POS_X)),
+          x(static_cast<int>(RacerDubinsParams::StateIndex::POS_Y)),
+          x(static_cast<int>(RacerDubinsParams::StateIndex::YAW)), kEgoLength, kEgoWidth,
+          cost_params.ego_axle_to_box_center);
       video.write(frame);
 
       cv::imshow("MPPI Tracking", frame);

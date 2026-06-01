@@ -14,7 +14,7 @@ struct RacerCostParams : public CostParams<2>
 {
   float desired_speed = 2.5F;
   float speed_coeff = 100.0F;
-  float track_coeff = 500.0F;
+  float track_coeff = 300.0F;
   float crash_coeff = 10000.0F;
   float boundary_threshold = 0.8F;
   float steer_coeff = 0.0F;
@@ -22,6 +22,10 @@ struct RacerCostParams : public CostParams<2>
   float lateral_jerk_coeff = 100.0F;
   float wheel_base = 0.3F;
   float steer_angle_scale = -9.1F;
+  /** Ego OBB for parked-car collision (rear axle at pose; box center offset forward). */
+  float ego_length = 0.55*1.5F;
+  float ego_width = 0.28*1.5F;
+  float ego_axle_to_box_center = 0.2F;
 };
 
 template <class CLASS_T, int NUM_TIMESTEPS, class PARAMS_T = RacerCostParams<NUM_TIMESTEPS>,
@@ -41,9 +45,12 @@ public:
 
   void setReferenceTrajectory(const float* x, const float* y, int count);
 
-  void setObstacles(const float* x, const float* y, const float* r, int count);
+  void setOrientedBoxObstacles(const float* x, const float* y, const float* yaw, const float* half_length,
+                               const float* half_width, int count);
 
   __host__ __device__ float computeTrackValue(float x, float y) const;
+
+  __host__ __device__ bool egoIntersectsParkedCar(const float x, const float y, const float yaw) const;
 
   float computeStateCost(const Eigen::Ref<const output_array>& y, int timestep, int* crash_status);
 
@@ -70,7 +77,9 @@ public:
   int num_obstacles_ = 0;
   float obs_x_[kMaxObstacles] = {};
   float obs_y_[kMaxObstacles] = {};
-  float obs_r_[kMaxObstacles] = {};
+  float obs_yaw_[kMaxObstacles] = {};
+  float obs_half_length_[kMaxObstacles] = {};
+  float obs_half_width_[kMaxObstacles] = {};
 
 private:
   void dataToDevice();

@@ -9,6 +9,7 @@
 #include <opencv2/opencv.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <numeric>
 #include <vector>
 
@@ -132,6 +133,67 @@ inline void drawReferencePath(cv::Mat& img, const std::vector<path::PathReferenc
              worldToPixel(ref[i + 1].x, ref[i + 1].y, img.cols, img.rows, scale), cv::Scalar(0, 165, 255), 2);
   }
   cv::addWeighted(overlay, 0.7, img, 0.3, 0, img);
+}
+
+/** Oriented rectangle at box center (body x = forward, y = left). */
+inline void drawOrientedBox(cv::Mat& img, const float cx, const float cy, const float yaw, const float length,
+                            const float width, const cv::Scalar& fill, const cv::Scalar& outline,
+                            const float scale = 15.0F)
+{
+  const float c = std::cos(yaw);
+  const float s = std::sin(yaw);
+  const float hl = length * 0.5F;
+  const float hw = width * 0.5F;
+
+  const float corners[4][2] = { { hl, hw }, { hl, -hw }, { -hl, -hw }, { -hl, hw } };
+  std::vector<cv::Point> px(4);
+  for (int i = 0; i < 4; ++i)
+  {
+    const float bx = corners[i][0];
+    const float by = corners[i][1];
+    const float wx = cx + c * bx - s * by;
+    const float wy = cy + s * bx + c * by;
+    const cv::Point2f p = worldToPixel(wx, wy, img.cols, img.rows, scale);
+    px[static_cast<size_t>(i)] =
+        cv::Point(static_cast<int>(p.x + 0.5F), static_cast<int>(p.y + 0.5F));
+  }
+
+  const cv::Point* poly = px.data();
+  const int n = 4;
+  cv::fillPoly(img, &poly, &n, 1, fill);
+  cv::polylines(img, px, true, outline, 1, cv::LINE_AA);
+}
+
+/** Oriented rectangle parked car (body x = forward, y = left). */
+inline void drawParkedCar(cv::Mat& img, const float x, const float y, const float yaw, const float length,
+                          const float width, const cv::Scalar& fill, const cv::Scalar& outline,
+                          const float scale = 15.0F)
+{
+  drawOrientedBox(img, x, y, yaw, length, width, fill, outline, scale);
+}
+
+/** Ego OBB from rear-axle pose (matches RacerCost egoIntersectsParkedCar footprint). */
+inline void drawEgoVehicleAtRearAxle(cv::Mat& img, const float axle_x, const float axle_y, const float yaw,
+                                      const float length, const float width, const float axle_to_box_center,
+                                      const cv::Scalar& fill = cv::Scalar(0, 200, 0),
+                                      const cv::Scalar& outline = cv::Scalar(0, 120, 0), const float scale = 15.0F)
+{
+  const float c = std::cos(yaw);
+  const float s = std::sin(yaw);
+  const float cx = axle_x + axle_to_box_center * c;
+  const float cy = axle_y + axle_to_box_center * s;
+  drawOrientedBox(img, cx, cy, yaw, length, width, fill, outline, scale);
+}
+
+template <typename ParkedCarT>
+inline void drawParkedCars(cv::Mat& img, const std::vector<ParkedCarT>& cars,
+                           const cv::Scalar& fill = cv::Scalar(40, 40, 180),
+                           const cv::Scalar& outline = cv::Scalar(20, 20, 100), const float scale = 15.0F)
+{
+  for (const ParkedCarT& car : cars)
+  {
+    drawParkedCar(img, car.ox, car.oy, car.yaw, car.length, car.width, fill, outline, scale);
+  }
 }
 
 template <typename TrajectoryMatrix>
