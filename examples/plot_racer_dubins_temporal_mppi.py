@@ -106,7 +106,7 @@ def load_log(csv_path: Path) -> dict:
     # Dubins bicycle: u_accel/u_steer (not throttle). Header may list 18 names while
     # rows only carry 14 fields (compact stadium logger).
     is_dubins = (
-        ncol in (14, 18, 20)
+        ncol in (14, 18, 19, 20)
         and "u_throttle" not in name_to_idx
         and (col("u_accel", 7) is not None or ncol == 14)
     )
@@ -143,12 +143,18 @@ def load_log(csv_path: Path) -> dict:
         out["rpx"] = col("ref_x", 11)
         out["rpy"] = col("ref_y", 12)
         out["ryaw"] = col("ref_yaw", 13)
-        out["ref_v"] = col("ref_v", 14)
-        out["arc_s"] = col("arc_s", 15)
-        out["lat_err"] = col("lat_err", 16)
+        out["ref_v_pose"] = col("ref_v_pose", 14)
+        if out["ref_v_pose"] is None:
+            out["ref_v_pose"] = col("ref_v", 14)
+        out["ref_v_target"] = col("ref_v_target", 15)
+        out["ref_v"] = out["ref_v_pose"]
+        out["arc_s"] = col("arc_s", 16 if out["ref_v_target"] is not None else 15)
+        out["lat_err"] = col("lat_err", 17 if out["ref_v_target"] is not None else 16)
         out["nominal_cost"] = col("nominal_cost", 17)
         out["mppi_applied_cost"] = col("mppi_applied_cost", 18)
-        out["baseline"] = col("baseline", 19) if col("baseline", 19) is not None else col("baseline", 17)
+        out["baseline"] = col("baseline", 18 if out["ref_v_target"] is not None else 17)
+        if out["baseline"] is None:
+            out["baseline"] = col("baseline", 19)
         out["u0_label"] = "u accel [m/s²]"
         out["u1_label"] = "u steer [rad]"
     elif ncol >= 19:
@@ -199,6 +205,15 @@ def load_log(csv_path: Path) -> dict:
         out["u0_label"] = "u0"
         out["u1_label"] = "u1"
 
+    if out.get("ref_v_target") is None:
+        out["ref_v_target"] = col("ref_v_target")
+    if out.get("ref_v_pose") is None:
+        out["ref_v_pose"] = col("ref_v_pose")
+        if out["ref_v_pose"] is None:
+            out["ref_v_pose"] = out.get("ref_v")
+    if out.get("ref_v") is None and out.get("ref_v_pose") is not None:
+        out["ref_v"] = out["ref_v_pose"]
+
     return out
 
 
@@ -245,7 +260,11 @@ def main() -> int:
     u0, u1 = log["u0"], log["u1"]
     nom_u0, nom_u1 = log["nom_u0"], log["nom_u1"]
     path_u0, path_u1 = log["path_u0"], log["path_u1"]
-    rpx, rpy, ryaw, ref_v = log["rpx"], log["rpy"], log["ryaw"], log["ref_v"]
+    rpx, rpy, ryaw = log["rpx"], log["rpy"], log["ryaw"]
+    ref_v_pose = log.get("ref_v_pose")
+    if ref_v_pose is None:
+        ref_v_pose = log.get("ref_v")
+    ref_v_target = log.get("ref_v_target")
     arc_s = log["arc_s"]
     lat_err = log["lat_err"]
     nominal_cost = log["nominal_cost"]
@@ -325,8 +344,19 @@ def main() -> int:
             ax.plot(t, rpy, "r--", alpha=0.6, label="ref")
         elif name == "yaw [rad]" and ryaw is not None:
             ax.plot(t, ryaw, "r--", alpha=0.6, label="ref")
-        elif name == "vel x [m/s]" and ref_v is not None:
-            ax.plot(t, ref_v, "r--", alpha=0.6, label="ref")
+        elif name == "vel x [m/s]":
+            if ref_v_target is not None:
+                ax.plot(t, ref_v_target, "r--", alpha=0.85, linewidth=1.4, label="ref speed target (speedAt)")
+            if ref_v_pose is not None:
+                ax.plot(
+                    t,
+                    ref_v_pose,
+                    color="C3",
+                    linestyle=":",
+                    alpha=0.55,
+                    linewidth=1.0,
+                    label="ref pose v (t=0)",
+                )
         ax.set_ylabel(name)
         ax.set_xlabel("t [s]")
         ax.grid(True, alpha=0.3)
@@ -431,7 +461,15 @@ def main() -> int:
     if arc_s is not None:
         ax_s = fig.add_subplot(gs[row_prog, :])
         ax_s.plot(t, arc_s, color="C6", linewidth=1.2, label="arc s (projected)")
-        v_ref = float(np.median(ref_v)) if len(ref_v) else 3.0
+        if ref_v_target is not None and len(ref_v_target):
+            v_ref = float(np.median(ref_v_target))
+            v_ref_label = "speedAt target"
+        elif ref_v_pose is not None and len(ref_v_pose):
+            v_ref = float(np.median(ref_v_pose))
+            v_ref_label = "pose v"
+        else:
+            v_ref = 3.0
+            v_ref_label = "ref"
         if perimeter and perimeter > 0:
             s_unwrap = np.zeros(len(arc_s))
             s_unwrap[0] = arc_s[0]
@@ -457,10 +495,17 @@ def main() -> int:
                 "r--",
                 alpha=0.55,
                 linewidth=1.0,
-                label=f"v_ref·t ({v_ref:.1f} m/s)",
+                label=f"v_ref·t ({v_ref:.1f} m/s, {v_ref_label})",
             )
         else:
-            ax_s.plot(t, v_ref * t, "r--", alpha=0.55, linewidth=1.0, label="v_ref·t")
+            ax_s.plot(
+                t,
+                v_ref * t,
+                "r--",
+                alpha=0.55,
+                linewidth=1.0,
+                label=f"v_ref·t ({v_ref:.1f} m/s, {v_ref_label})",
+            )
         ax_s.set_ylabel("arc length [m]")
         ax_s.set_xlabel("t [s]")
         ax_s.set_title("Progress along path")

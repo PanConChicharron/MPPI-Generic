@@ -207,7 +207,7 @@ private:
   float dt_ = 0.1F;
   float v_max_ = 3.0F;
   float target_speed_ = 3.0F;
-  float a_lat_max_ = 2.0F;
+  float a_lat_max_ = 8.0F;
   int merge_horizon_steps_ = 20;
 };
 

@@ -20,6 +20,7 @@
 #include <mppi/sampling_distributions/gaussian/gaussian.cuh>
 
 #include "path_tracking_viz.hpp"
+#include "step_timing.hpp"
 
 #include <opencv2/opencv.hpp>
 
@@ -111,6 +112,7 @@ int main(int argc, char** argv)
     DYN model;
     RacerDubinsParams dyn;
     dyn.wheel_base = 0.3f;
+    // Engine tuned for ~5.5 m/s steady state at full throttle (see RacerDubinsParams defaults).
     model.setParams(dyn);
 
     COST cost;
@@ -135,7 +137,7 @@ int main(int argc, char** argv)
 
     SAMPLER::SAMPLING_PARAMS_T sp{};
     sp.std_dev[static_cast<int>(RacerDubinsParams::ControlIndex::THROTTLE_BRAKE)] = 0.2F;
-    sp.std_dev[static_cast<int>(RacerDubinsParams::ControlIndex::STEER_CMD)] = 0.3F;
+    sp.std_dev[static_cast<int>(RacerDubinsParams::ControlIndex::STEER_CMD)] = 0.1F;
     sp.sum_strides = std::max(32, (kNumRollouts + 1023) / 1024);
     SAMPLER sampler(sp);
 
@@ -189,11 +191,16 @@ int main(int argc, char** argv)
     }
     // Same schema as dubins_circle_path_tracking_example (u_accel/u_steer columns hold throttle/steer).
     log << "t,pos_x,pos_y,yaw,vel_x,steer_angle,brake_state,u_accel,u_steer,nom_u_accel,nom_u_steer,"
-           "ref_x,ref_y,ref_yaw,ref_v,arc_s,lat_err,baseline\n";
+           "ref_x,ref_y,ref_yaw,ref_v_pose,ref_v_target,arc_s,lat_err,baseline\n";
     log << std::scientific;
+
+    mppi::timing::StepTimingCollector step_timing;
+    step_timing.reserve(num_sim_steps);
 
     // 9. Main simulation loop
     for (size_t k = 0; k < num_sim_steps; ++k) {
+      step_timing.beginStep();
+
       const std::vector<mppi::path::PathReferenceSample> ref = ref_gen.generate(
           path, arcLength, kRefHorizon, x(static_cast<int>(RacerDubinsParams::StateIndex::POS_X)),
           x(static_cast<int>(RacerDubinsParams::StateIndex::POS_Y)),
@@ -209,7 +216,9 @@ int main(int argc, char** argv)
       controller.computeControl(x, 1);
       cudaStreamSynchronize(controller.stream_);
       controller.calculateSampledStateTrajectories();
-      
+
+      step_timing.endMppi();
+
       Mppi::control_trajectory u_opt = controller.getControlSeq();
 
       /* Video frame generation */
@@ -242,7 +251,13 @@ int main(int argc, char** argv)
       video.write(frame);
 
       cv::imshow("MPPI Tracking", frame);
-      if (cv::waitKey(1) == 27) break; // Exit on ESC
+      step_timing.endViz();
+
+      if (cv::waitKey(1) == 27)
+      {
+        step_timing.endStepEarlyExit();
+        break;
+      }
 
       // Step simulation model
       DYN::state_array x_next = model.getZeroState();
@@ -263,6 +278,7 @@ int main(int argc, char** argv)
       arcLength = proj.arc_length_s;
 
       const mppi::path::PathReferenceSample& r0 = ref.front();
+      const float ref_v_target = ref_gen.speedAt(path, proj.arc_length_s);
       const float t_end = static_cast<float>(k + 1) * kDt;
       log << t_end << ","
           << x(static_cast<int>(RacerDubinsParams::StateIndex::POS_X)) << ","
@@ -275,12 +291,16 @@ int main(int argc, char** argv)
           << u_opt.col(0)(static_cast<int>(RacerDubinsParams::ControlIndex::STEER_CMD)) << ","
           << u_nom_step(static_cast<int>(RacerDubinsParams::ControlIndex::THROTTLE_BRAKE)) << ","
           << u_nom_step(static_cast<int>(RacerDubinsParams::ControlIndex::STEER_CMD)) << ","
-          << r0.x << "," << r0.y << "," << r0.yaw << "," << r0.v << ","
+          << r0.x << "," << r0.y << "," << r0.yaw << "," << r0.v << "," << ref_v_target << ","
           << proj.arc_length_s << "," << proj.signed_lateral_error << ","
           << static_cast<float>(controller.getBaselineCost()) << "\n";
+
+      step_timing.endStep();
     }
 
     log.close();
+
+    step_timing.printReport();
     cost.freeCudaMem();
     return 0;
 }
