@@ -4,8 +4,8 @@
  */
 
 #include <mppi/dynamics/racer_dubins/racer_dubins.cuh>
-#include <mppi/cost_functions/racer/racer_cost_map.cuh>
-#include <mppi/cost_functions/racer/racer_costmap_builder.hpp>
+#include <mppi/cost_functions/racer/racer_cost.cuh>
+#include <mppi/cost_functions/racer/racer_cost_bridge.hpp>
 #include <mppi/controllers/MPPI/mppi_controller.cuh>
 #include <mppi/feedback_controllers/zero_feedback.cuh>
 #include <mppi/path/path_projection.hpp>
@@ -31,20 +31,19 @@ namespace
   constexpr int kNumRollouts = 4*1024;
   constexpr float kTargetSpeed = 2.5F;
   constexpr float kVMax = 3.0F;
-  constexpr size_t kSimLaps = 1;
+  constexpr size_t kSimLaps = 5;
   
   constexpr float kStraightLength = 40.0F;
   constexpr float kTurnRadius = 10.0F;
   constexpr int kSamplesPerArc = 48;
   
   constexpr float kInitArcLength = kStraightLength - 2.0F;
-  constexpr float kInitLateralOffset = 0.1F;
   
   constexpr float kLambda = 100.0F;
 
   // --- MPPI Controller Setup ---
   using DYN = RacerDubins;
-  using COST = RacerCostMap;
+  using COST = RacerCost<kRefHorizon>;
   using FB = ZeroFeedback<DYN, kMppiHorizon>;
   using SAMPLER = mppi::sampling_distributions::GaussianDistribution<DYN::DYN_PARAMS_T>;
   using Mppi = VanillaMPPIController<DYN, COST, FB, kMppiHorizon, kNumRollouts, SAMPLER>;
@@ -79,15 +78,8 @@ int main(int argc, char** argv)
     /* Environment */
     // 2. Generate track path (stadium shape)
     const mppi::path::Path2D path = mppi::path::Path2D::stadium(kStraightLength, kTurnRadius, kSamplesPerArc);
-    
-    float x_min = -40, x_max = 60, y_min = -30, y_max = 30;
-    float ppm = 10.0f;
-    int width = (x_max - x_min) * ppm;
-    int height = (y_max - y_min) * ppm;
-    
-    cv::Mat costmap_img;
 
-    std::vector<mppi::cost::RacerCostmapObstacle> obstacles;
+    std::vector<mppi::cost::RacerCostObstacle> obstacles;
     std::mt19937 gen(seed);
     std::uniform_real_distribution<float> dist_s(0, path.length());
     std::uniform_real_distribution<float> dist_side(-1.0, 1.0);
@@ -111,19 +103,15 @@ int main(int argc, char** argv)
     float arcLength = kInitArcLength;
     const std::vector<mppi::path::PathReferenceSample> ref_init =
         ref_gen.generate(path, arcLength, kRefHorizon);
-    std::vector<float4> cost_map_gpu_data;
-    mppi::cost::updateRacerCostmap(costmap_img, ref_init, obstacles, width, height, ppm, x_min, y_min,
-                                   cost_map_gpu_data);
 
     COST cost;
     cost.GPUSetup();
-    cost.costmapToTexture(width, height, cost_map_gpu_data.data());
-    cost.setCpuCostmap(costmap_img);
 
-    RacerCostMapParams cost_params;
+    RacerCostParams<kRefHorizon> cost_params;
     cost_params.desired_speed = kTargetSpeed;
     cost.setParams(cost_params);
-    cost.setWorldToCostmapBounds(x_min, x_max, y_min, y_max);
+    mppi::cost::fillRacerCostFromPathReference<kRefHorizon>(cost, ref_init);
+    mppi::cost::fillRacerCostObstacles<kRefHorizon>(cost, obstacles);
 
     /* Model parameters */
     // 5. Setup model and sampling distributions
@@ -167,7 +155,6 @@ int main(int argc, char** argv)
     // 8. Prepare visualization
     cv::Mat base_frame = cv::Mat::zeros(1024, 1024, CV_8UC3);
     mppi::viz::drawCenterline(base_frame, path);
-    // Draw obstacles on base frame
     for (const auto& obs : obstacles) {
         cv::circle(base_frame, mppi::viz::worldToPixel(obs.ox, obs.oy, 1024, 1024), obs.r * 15.0f, cv::Scalar(0, 0, 255), -1);
     }
@@ -175,9 +162,6 @@ int main(int argc, char** argv)
     cv::VideoWriter video(video_path, 
                       cv::VideoWriter::fourcc('m','p','4','v'), 
                       static_cast<int>(1.0F/kDt), base_frame.size());
-    cv::VideoWriter costmap_video("racer_dubins_stadium_costmap.mp4", 
-                               cv::VideoWriter::fourcc('m','p','4','v'), 
-                               static_cast<int>(1.0F/kDt), costmap_img.size());
 
     cv::namedWindow("MPPI Tracking", cv::WINDOW_NORMAL);
     cv::resizeWindow("MPPI Tracking", base_frame.cols, base_frame.rows);
@@ -185,19 +169,7 @@ int main(int argc, char** argv)
     // 9. Main simulation loop
     for (size_t k = 0; k < num_sim_steps; ++k) {
       const std::vector<mppi::path::PathReferenceSample> ref = ref_gen.generate(path, arcLength, kRefHorizon);
-      
-      // Update the costmap
-      mppi::cost::updateRacerCostmap(costmap_img, ref, obstacles, width, height, ppm, x_min, y_min,
-                                     cost_map_gpu_data);
-      
-      // Save costmap frame
-      cv::Mat costmap_vis;
-      costmap_img.convertTo(costmap_vis, CV_8UC1, 255.0);
-      cv::cvtColor(costmap_vis, costmap_vis, cv::COLOR_GRAY2BGR);
-      costmap_video.write(costmap_vis);
-
-      cost.updateCostmapTexture(cost_map_gpu_data.data());
-      cost.setCpuCostmap(costmap_img);
+      mppi::cost::fillRacerCostFromPathReference<kRefHorizon>(cost, ref);
       
       // Update importance sampling based on current nominal control
       controller.updateImportanceSampler(u_nom);
