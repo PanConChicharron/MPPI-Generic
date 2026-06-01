@@ -172,11 +172,11 @@ __device__ float RacerCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PARAMS_T>::
 {
   (void)theta_c;
 
-  const float x = y[static_cast<int>(RacerDubinsParams::OutputIndex::BASELINK_POS_I_X)];
+  const float x_pos = y[static_cast<int>(RacerDubinsParams::OutputIndex::BASELINK_POS_I_X)];
   const float y_pos = y[static_cast<int>(RacerDubinsParams::OutputIndex::BASELINK_POS_I_Y)];
   const float vel = racerRolloutSpeed(y);
 
-  const float track_val = computeTrackValue(x, y_pos);
+  const float track_val = computeTrackValue(x_pos, y_pos);
 
   const float vel_diff = vel - this->params_.desired_speed;
   const float speed_cost = this->params_.speed_coeff * (vel_diff * vel_diff);
@@ -198,11 +198,11 @@ template <class CLASS_T, int NUM_TIMESTEPS, class PARAMS_T, class DYN_PARAMS_T>
 float RacerCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PARAMS_T>::computeStateCost(
     const Eigen::Ref<const output_array>& y, int timestep, int* crash_status)
 {
-  const float x = y[static_cast<int>(RacerDubinsParams::OutputIndex::BASELINK_POS_I_X)];
+  const float x_pos = y[static_cast<int>(RacerDubinsParams::OutputIndex::BASELINK_POS_I_X)];
   const float y_pos = y[static_cast<int>(RacerDubinsParams::OutputIndex::BASELINK_POS_I_Y)];
   const float vel = racerRolloutSpeed(y.data());
 
-  const float track_val = computeTrackValue(x, y_pos);
+  const float track_val = computeTrackValue(x_pos, y_pos);
 
   const float vel_diff = vel - this->params_.desired_speed;
   const float speed_cost = this->params_.speed_coeff * (vel_diff * vel_diff);
@@ -247,9 +247,9 @@ template <class CLASS_T, int NUM_TIMESTEPS, class PARAMS_T, class DYN_PARAMS_T>
 __device__ float RacerCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PARAMS_T>::terminalCost(float* y, float* theta_c)
 {
   (void)theta_c;
-  const float x = y[static_cast<int>(RacerDubinsParams::OutputIndex::BASELINK_POS_I_X)];
+  const float x_pos = y[static_cast<int>(RacerDubinsParams::OutputIndex::BASELINK_POS_I_X)];
   const float y_pos = y[static_cast<int>(RacerDubinsParams::OutputIndex::BASELINK_POS_I_Y)];
-  const float track_val = computeTrackValue(x, y_pos);
+  const float track_val = computeTrackValue(x_pos, y_pos);
   return this->params_.track_coeff * track_val * 10.0F;
 }
 

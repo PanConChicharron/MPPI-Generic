@@ -47,7 +47,7 @@ namespace
   
   constexpr float kInitArcLength = kStraightLength - 2.0F;
   
-  constexpr float kLambda = 100.0F;
+  constexpr float kLambda = 1500.0F;
 
   // --- MPPI Controller Setup ---
   using DYN = RacerDubins;
@@ -110,12 +110,11 @@ int main(int argc, char** argv)
 
     mppi::path::PathReferenceGenerator ref_gen(kDt);
     ref_gen.setSpeedCap(kVMax);
+    ref_gen.setTargetSpeed(kTargetSpeed);
 
     const size_t num_sim_steps = simStepsForLaps(path, kSimLaps);
 
     float arcLength = kInitArcLength;
-    const std::vector<mppi::path::PathReferenceSample> ref_init =
-        ref_gen.generate(path, arcLength, kRefHorizon);
 
     /* Model parameters */
     // 5. Setup model and sampling distributions
@@ -133,7 +132,6 @@ int main(int argc, char** argv)
     cost_params.wheel_base = dyn.wheel_base;
     cost_params.steer_angle_scale = dyn.steer_angle_scale;
     cost.setParams(cost_params);
-    mppi::cost::fillRacerCostFromPathReference<kRefHorizon>(cost, ref_init);
     mppi::cost::fillRacerCostObstacles<kRefHorizon>(cost, obstacles);
 
     std::array<float2, DYN::CONTROL_DIM> u_rng{};
@@ -170,8 +168,16 @@ int main(int argc, char** argv)
     x(static_cast<int>(RacerDubinsParams::StateIndex::YAW)) = p0.yaw;
     x(static_cast<int>(RacerDubinsParams::StateIndex::VEL_X)) = kTargetSpeed;
 
+    const std::vector<mppi::path::PathReferenceSample> ref_init = ref_gen.generate(
+        path, arcLength, kRefHorizon, x(static_cast<int>(RacerDubinsParams::StateIndex::POS_X)),
+        x(static_cast<int>(RacerDubinsParams::StateIndex::POS_Y)),
+        x(static_cast<int>(RacerDubinsParams::StateIndex::YAW)),
+        x(static_cast<int>(RacerDubinsParams::StateIndex::VEL_X)));
+    mppi::cost::fillRacerCostFromPathReference<kRefHorizon>(cost, ref_init);
+
     // 8. Prepare visualization
     cv::Mat base_frame = mppi::viz::makeWhiteFrame(1024, 1024);
+    mppi::viz::drawRoadBoundaries(base_frame, path, cost_params.boundary_threshold);
     mppi::viz::drawCenterline(base_frame, path);
     for (const auto& obs : obstacles) {
         cv::circle(base_frame, mppi::viz::worldToPixel(obs.ox, obs.oy, 1024, 1024), obs.r * 15.0f, cv::Scalar(0, 0, 255), -1);
@@ -196,7 +202,11 @@ int main(int argc, char** argv)
 
     // 9. Main simulation loop
     for (size_t k = 0; k < num_sim_steps; ++k) {
-      const std::vector<mppi::path::PathReferenceSample> ref = ref_gen.generate(path, arcLength, kRefHorizon);
+      const std::vector<mppi::path::PathReferenceSample> ref = ref_gen.generate(
+          path, arcLength, kRefHorizon, x(static_cast<int>(RacerDubinsParams::StateIndex::POS_X)),
+          x(static_cast<int>(RacerDubinsParams::StateIndex::POS_Y)),
+          x(static_cast<int>(RacerDubinsParams::StateIndex::YAW)),
+          x(static_cast<int>(RacerDubinsParams::StateIndex::VEL_X)));
       mppi::cost::fillRacerCostFromPathReference<kRefHorizon>(cost, ref);
       
       // Update importance sampling based on current nominal control

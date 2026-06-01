@@ -61,6 +61,62 @@ inline void drawCenterline(cv::Mat& img, const path::Path2D& path, const float s
   cv::addWeighted(overlay, 0.85, img, 0.15, 0, img);
 }
 
+/** Draw left/right road edges offset from the path centerline (matches RacerCost boundary_threshold). */
+inline void drawRoadBoundaries(cv::Mat& img, const path::Path2D& path, const float half_width = 0.8F,
+                               const float scale = 15.0F, const bool fill_corridor = true)
+{
+  const float path_length = path.length();
+  if (path_length <= 0.0F || half_width <= 0.0F)
+  {
+    return;
+  }
+
+  constexpr float kSampleSpacing = 0.5F;
+  std::vector<cv::Point> left_px;
+  std::vector<cv::Point> right_px;
+  left_px.reserve(static_cast<size_t>(path_length / kSampleSpacing) + 4U);
+  right_px.reserve(left_px.capacity());
+
+  for (float s = 0.0F; s <= path_length; s += kSampleSpacing)
+  {
+    const path::Pose2D p = path.poseAt(s);
+    float tx = 0.0F;
+    float ty = 0.0F;
+    path.tangentAt(s, tx, ty);
+    const cv::Point2f left =
+        worldToPixel(p.x - half_width * ty, p.y + half_width * tx, img.cols, img.rows, scale);
+    const cv::Point2f right =
+        worldToPixel(p.x + half_width * ty, p.y - half_width * tx, img.cols, img.rows, scale);
+    left_px.emplace_back(static_cast<int>(left.x + 0.5F), static_cast<int>(left.y + 0.5F));
+    right_px.emplace_back(static_cast<int>(right.x + 0.5F), static_cast<int>(right.y + 0.5F));
+  }
+
+  if (left_px.size() < 2U)
+  {
+    return;
+  }
+
+  if (fill_corridor)
+  {
+    std::vector<cv::Point> corridor = left_px;
+    corridor.insert(corridor.end(), right_px.rbegin(), right_px.rend());
+    cv::Mat overlay = img.clone();
+    const cv::Point* pts = corridor.data();
+    const int n_pts = static_cast<int>(corridor.size());
+    cv::fillPoly(overlay, &pts, &n_pts, 1, cv::Scalar(235, 245, 235));
+    cv::addWeighted(overlay, 0.35, img, 0.65, 0, img);
+  }
+
+  cv::Mat overlay = img.clone();
+  const cv::Scalar edge_color(120, 120, 120);
+  for (size_t i = 0; i + 1 < left_px.size(); ++i)
+  {
+    cv::line(overlay, left_px[i], left_px[i + 1], edge_color, 1, cv::LINE_AA);
+    cv::line(overlay, right_px[i], right_px[i + 1], edge_color, 1, cv::LINE_AA);
+  }
+  cv::addWeighted(overlay, 0.9, img, 0.1, 0, img);
+}
+
 inline void drawReferencePath(cv::Mat& img, const std::vector<path::PathReferenceSample>& ref,
                               const float scale = 15.0F)
 {
