@@ -8,6 +8,7 @@
 
 #include <opencv2/opencv.hpp>
 
+#include <algorithm>
 #include <vector>
 
 namespace mppi
@@ -69,19 +70,23 @@ inline void drawTrajectory(cv::Mat& img, const TrajectoryMatrix& traj, const int
 
 template <typename TrajectoryMatrix>
 inline void drawSampledTrajectories(cv::Mat& img, const std::vector<TrajectoryMatrix>& sampled_trajectories,
-                                    const int x_idx, const int y_idx,
+                                    const int x_idx, const int y_idx, const int num_timesteps,
                                     const cv::Scalar& color = cv::Scalar(180, 180, 180), const int thickness = 1,
                                     const float overlay_alpha = 0.4F, const float scale = 15.0F)
 {
-  if (sampled_trajectories.empty())
+  if (sampled_trajectories.empty() || num_timesteps <= 1)
   {
     return;
   }
 
+  // GPU->host copy stores outputs in columns [0, num_timesteps - 2]; column num_timesteps - 1 stays zero.
+  const int num_valid_cols = num_timesteps - 1;
+
   cv::Mat overlay = img.clone();
   for (const TrajectoryMatrix& traj : sampled_trajectories)
   {
-    for (int i = 0; i + 1 < traj.cols(); ++i)
+    const int cols_to_draw = std::min(num_valid_cols, static_cast<int>(traj.cols()));
+    for (int i = 0; i + 1 < cols_to_draw; ++i)
     {
       cv::line(overlay, worldToPixel(traj(x_idx, i), traj(y_idx, i), img.cols, img.rows, scale),
                worldToPixel(traj(x_idx, i + 1), traj(y_idx, i + 1), img.cols, img.rows, scale), color, thickness);

@@ -152,7 +152,7 @@ int main(int argc, char** argv)
       cp.cost_rollout_dim_ = dim3(32, 2, 1);
       cp.seed_ = 1U;
       controller.setParams(cp);
-      controller.setPercentageSampledControlTrajectories(0.01F);
+      controller.setPercentageSampledControlTrajectories(128.0F / static_cast<float>(kNumRollouts));
     }
     model.GPUSetup();
 
@@ -212,15 +212,17 @@ int main(int argc, char** argv)
       /* Video frame generation */
       const auto state_trajectory = controller.getActualStateSeq();
       const auto sampled_trajectories = controller.getSampledOutputTrajectories();
-      
-      const int x_idx = static_cast<int>(RacerDubinsParams::StateIndex::POS_X);
-      const int y_idx = static_cast<int>(RacerDubinsParams::StateIndex::POS_Y);
+
+      const int state_x_idx = static_cast<int>(RacerDubinsParams::StateIndex::POS_X);
+      const int state_y_idx = static_cast<int>(RacerDubinsParams::StateIndex::POS_Y);
+      const int output_x_idx = static_cast<int>(RacerDubinsParams::OutputIndex::BASELINK_POS_I_X);
+      const int output_y_idx = static_cast<int>(RacerDubinsParams::OutputIndex::BASELINK_POS_I_Y);
 
       auto frame = base_frame.clone();
-      
+
       mppi::viz::drawReferencePath(frame, ref);
-      mppi::viz::drawSampledTrajectories(frame, sampled_trajectories, x_idx, y_idx);
-      mppi::viz::drawTrajectory(frame, state_trajectory, x_idx, y_idx);
+      mppi::viz::drawSampledTrajectories(frame, sampled_trajectories, output_x_idx, output_y_idx, kMppiHorizon);
+      mppi::viz::drawTrajectory(frame, state_trajectory, state_x_idx, state_y_idx);
       video.write(frame);
 
       cv::imshow("MPPI Tracking", frame);
