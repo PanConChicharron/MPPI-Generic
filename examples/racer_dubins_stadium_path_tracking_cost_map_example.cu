@@ -7,7 +7,7 @@
 #include <mppi/cost_functions/racer/racer_cost_map.cuh>
 #include <mppi/cost_functions/racer/racer_costmap_builder.hpp>
 #include <mppi/controllers/MPPI/mppi_controller.cuh>
-#include <mppi/feedback_controllers/zero_feedback.cuh>
+#include <mppi/feedback_controllers/path_tracker_feedback.cuh>
 #include <mppi/path/path_projection.hpp>
 #include <mppi/path/path_reference_generator.hpp>
 #include <mppi/path/path2d.hpp>
@@ -45,7 +45,7 @@ namespace
   // --- MPPI Controller Setup ---
   using DYN = RacerDubins;
   using COST = RacerCostMap;
-  using FB = ZeroFeedback<DYN, kMppiHorizon>;
+  using FB = PathTrackerFeedback<DYN, kMppiHorizon>;
   using SAMPLER = mppi::sampling_distributions::GaussianDistribution<DYN::DYN_PARAMS_T>;
   using Mppi = VanillaMPPIController<DYN, COST, FB, kMppiHorizon, kNumRollouts, SAMPLER>;
 
@@ -198,7 +198,12 @@ int main(int argc, char** argv)
 
       cost.updateCostmapTexture(cost_map_gpu_data.data());
       cost.setCpuCostmap(costmap_img);
-      
+
+      const Mppi::state_trajectory goal_traj =
+          mppi::feedback::goalTrajectoryFromPathReference<DYN, kMppiHorizon>(ref);
+      feedback.updateReference(path, ref);
+      feedback.applyFeedforwardToNominal(u_nom, x, goal_traj);
+
       // Update importance sampling based on current nominal control
       controller.updateImportanceSampler(u_nom);
 

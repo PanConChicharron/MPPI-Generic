@@ -22,7 +22,7 @@
 #include <mppi/cost_functions/racer/racer_cost.cuh>
 #include <mppi/cost_functions/racer/racer_cost_bridge.hpp>
 #include <mppi/dynamics/racer_dubins/racer_dubins.cuh>
-#include <mppi/feedback_controllers/zero_feedback.cuh>
+#include <mppi/feedback_controllers/path_tracker_feedback.cuh>
 #include <mppi/path/path2d.hpp>
 #include <mppi/path/path_reference_generator.hpp>
 #include <mppi/sampling_distributions/gaussian/gaussian.cuh>
@@ -53,7 +53,7 @@ constexpr float kLambda = 1000.0F;
 
 using DYN = RacerDubins;
 using COST = RacerCost<kRefHorizon>;
-using FB = ZeroFeedback<DYN, kMppiHorizon>;
+using FB = PathTrackerFeedback<DYN, kMppiHorizon>;
 using SAMPLER = mppi::sampling_distributions::GaussianDistribution<DYN::DYN_PARAMS_T>;
 using Mppi = VanillaMPPIController<DYN, COST, FB, kMppiHorizon, kNumRollouts, SAMPLER>;
 
@@ -189,6 +189,9 @@ int main(int argc, char** argv)
       x(static_cast<int>(RacerDubinsParams::StateIndex::YAW)),
       x(static_cast<int>(RacerDubinsParams::StateIndex::VEL_X)));
   mppi::cost::fillRacerCostFromPathReference<kRefHorizon>(cost, ref);
+  const Mppi::state_trajectory goal_traj = mppi::feedback::goalTrajectoryFromPathReference<DYN, kMppiHorizon>(ref);
+  feedback.updateReference(path, ref);
+  feedback.applyFeedforwardToNominal(u_nom, x, goal_traj);
   controller.updateImportanceSampler(u_nom);
 
   std::cout << "Racer Dubins stadium MPPI rollout analysis  straight=" << kStraightLength << " m  R=" << kTurnRadius
