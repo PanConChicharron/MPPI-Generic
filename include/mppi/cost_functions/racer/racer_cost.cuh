@@ -18,8 +18,10 @@ struct RacerCostParams : public CostParams<2>
   float crash_coeff = 10000.0F;
   float boundary_threshold = 0.8F;
   float steer_coeff = 50.0F;
-  float track_dist_scale = 0.4F;  // world distance to track_val; use ppm / 25.0 for costmap parity
-  float track_cost_cap = 0.75F;
+  float lateral_acceleration_coeff = 50.0F;
+  float lateral_jerk_coeff = 50.0F;
+  float wheel_base = 0.3F;
+  float steer_angle_scale = -9.1F;
 };
 
 template <class CLASS_T, int NUM_TIMESTEPS, class PARAMS_T = RacerCostParams<NUM_TIMESTEPS>,
@@ -43,15 +45,25 @@ public:
 
   __host__ __device__ float computeTrackValue(float x, float y) const;
 
-  __device__ float computeStateCost(float* y, int timestep, float* theta_c, int* crash_status);
-
   float computeStateCost(const Eigen::Ref<const output_array>& y, int timestep, int* crash_status);
 
-  __device__ float computeControlCost(float* u, int timestep, float* theta_c, int* crash);
+  __device__ float computeStateCost(float* y, int timestep, float* theta_c, int* crash_status);
 
   float computeControlCost(const Eigen::Ref<const control_array>& u, int timestep, int* crash);
 
+  __device__ float computeControlCost(float* u, int timestep, float* theta_c, int* crash);
+
+  float computeComfortCost(const Eigen::Ref<const control_array>& u, const Eigen::Ref<const output_array>& y,
+                           int timestep);
+  
+  __device__ float computeComfortCost(float* u, float* y, int timestep);
+
   __device__ float terminalCost(float* y, float* theta_c);
+
+  float computeRunningCost(const Eigen::Ref<const output_array>& y, const Eigen::Ref<const control_array>& u,
+                           int timestep, int* crash);
+
+  __device__ float computeRunningCost(float* y, float* u, int timestep, float* theta_c, int* crash);
 
   float ref_x_[NUM_TIMESTEPS] = {};
   float ref_y_[NUM_TIMESTEPS] = {};

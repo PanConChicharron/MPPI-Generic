@@ -165,7 +165,7 @@ int main(int argc, char** argv)
     x(static_cast<int>(RacerDubinsParams::StateIndex::VEL_X)) = kTargetSpeed;
 
     // 8. Prepare visualization
-    cv::Mat base_frame = cv::Mat::zeros(1024, 1024, CV_8UC3);
+    cv::Mat base_frame = mppi::viz::makeWhiteFrame(1024, 1024);
     mppi::viz::drawCenterline(base_frame, path);
     // Draw obstacles on base frame
     for (const auto& obs : obstacles) {
@@ -212,6 +212,13 @@ int main(int argc, char** argv)
       /* Video frame generation */
       const auto state_trajectory = controller.getActualStateSeq();
       const auto sampled_trajectories = controller.getSampledOutputTrajectories();
+      const auto sampled_cost_trajs = controller.getSampledCostTrajectories();
+
+      std::vector<float> rollout_costs(sampled_cost_trajs.size());
+      for (size_t i = 0; i < sampled_cost_trajs.size(); ++i)
+      {
+        rollout_costs[i] = sampled_cost_trajs[i].sum();
+      }
 
       const int state_x_idx = static_cast<int>(RacerDubinsParams::StateIndex::POS_X);
       const int state_y_idx = static_cast<int>(RacerDubinsParams::StateIndex::POS_Y);
@@ -221,7 +228,8 @@ int main(int argc, char** argv)
       auto frame = base_frame.clone();
 
       mppi::viz::drawReferencePath(frame, ref);
-      mppi::viz::drawSampledTrajectories(frame, sampled_trajectories, output_x_idx, output_y_idx, kMppiHorizon);
+      mppi::viz::drawSampledTrajectories(frame, sampled_trajectories, output_x_idx, output_y_idx, kMppiHorizon,
+                                         rollout_costs);
       mppi::viz::drawTrajectory(frame, state_trajectory, state_x_idx, state_y_idx);
       video.write(frame);
 

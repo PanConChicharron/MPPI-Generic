@@ -1,7 +1,13 @@
 /**
  * @file racer_dubins_stadium_path_tracking_example.cu
  * @brief Example of MPPI-based path tracking and obstacle avoidance for a Racer Dubins model on a stadium track.
+ *
+ * Build: cmake --build build --target racer_dubins_stadium_path_tracking_example
+ * Run:   ./build/examples/racer_dubins_stadium_path_tracking_example [seed] [log.csv]
+ * Plot:  python3 examples/plot_racer_dubins_temporal_mppi.py racer_dubins_stadium_path_tracking_log.csv
  */
+
+#include "mppi_rollout_csv.hpp"
 
 #include <mppi/dynamics/racer_dubins/racer_dubins.cuh>
 #include <mppi/cost_functions/racer/racer_cost.cuh>
@@ -19,8 +25,10 @@
 
 #include <algorithm>
 #include <cmath>
-#include <string>
+#include <fstream>
+#include <iomanip>
 #include <random>
+#include <string>
 
 namespace
 {
@@ -29,8 +37,8 @@ namespace
   constexpr int kRefHorizon = kMppiHorizon;
   constexpr float kDt = 0.1F;
   constexpr int kNumRollouts = 4*1024;
-  constexpr float kTargetSpeed = 2.5F;
-  constexpr float kVMax = 3.0F;
+  constexpr float kTargetSpeed = 10.0F;
+  constexpr float kVMax = 12.0F;
   constexpr size_t kSimLaps = 5;
   
   constexpr float kStraightLength = 40.0F;
@@ -74,10 +82,15 @@ int main(int argc, char** argv)
     }
     std::cout << "Using random seed: " << seed << std::endl;
     std::string video_path = "racer_dubins_stadium_path_tracking.mp4";
+    std::string log_path = "racer_dubins_stadium_path_tracking_log.csv";
+    if (argc > 2) {
+        log_path = argv[2];
+    }
 
     /* Environment */
     // 2. Generate track path (stadium shape)
     const mppi::path::Path2D path = mppi::path::Path2D::stadium(kStraightLength, kTurnRadius, kSamplesPerArc);
+    mppi::rollout_csv::writeCenterlineForLog(path, log_path);
 
     std::vector<mppi::cost::RacerCostObstacle> obstacles;
     std::mt19937 gen(seed);
@@ -104,21 +117,25 @@ int main(int argc, char** argv)
     const std::vector<mppi::path::PathReferenceSample> ref_init =
         ref_gen.generate(path, arcLength, kRefHorizon);
 
-    COST cost;
-    cost.GPUSetup();
-
-    RacerCostParams<kRefHorizon> cost_params;
-    cost_params.desired_speed = kTargetSpeed;
-    cost.setParams(cost_params);
-    mppi::cost::fillRacerCostFromPathReference<kRefHorizon>(cost, ref_init);
-    mppi::cost::fillRacerCostObstacles<kRefHorizon>(cost, obstacles);
-
     /* Model parameters */
     // 5. Setup model and sampling distributions
     DYN model;
     RacerDubinsParams dyn;
     dyn.wheel_base = 0.3f;
     model.setParams(dyn);
+
+    COST cost;
+    cost.GPUSetup();
+
+    RacerCostParams<kRefHorizon> cost_params;
+    cost_params.desired_speed = kTargetSpeed;
+    // Keep curvature/jerk comfort terms consistent with the active vehicle model.
+    cost_params.wheel_base = dyn.wheel_base;
+    cost_params.steer_angle_scale = dyn.steer_angle_scale;
+    cost.setParams(cost_params);
+    mppi::cost::fillRacerCostFromPathReference<kRefHorizon>(cost, ref_init);
+    mppi::cost::fillRacerCostObstacles<kRefHorizon>(cost, obstacles);
+
     std::array<float2, DYN::CONTROL_DIM> u_rng{};
     u_rng[static_cast<int>(RacerDubinsParams::ControlIndex::THROTTLE_BRAKE)] = { -1.0f, 1.0f };
     u_rng[static_cast<int>(RacerDubinsParams::ControlIndex::STEER_CMD)] = { -1.0f, 1.0f };
@@ -154,7 +171,7 @@ int main(int argc, char** argv)
     x(static_cast<int>(RacerDubinsParams::StateIndex::VEL_X)) = kTargetSpeed;
 
     // 8. Prepare visualization
-    cv::Mat base_frame = cv::Mat::zeros(1024, 1024, CV_8UC3);
+    cv::Mat base_frame = mppi::viz::makeWhiteFrame(1024, 1024);
     mppi::viz::drawCenterline(base_frame, path);
     for (const auto& obs : obstacles) {
         cv::circle(base_frame, mppi::viz::worldToPixel(obs.ox, obs.oy, 1024, 1024), obs.r * 15.0f, cv::Scalar(0, 0, 255), -1);
@@ -167,6 +184,16 @@ int main(int argc, char** argv)
     cv::namedWindow("MPPI Tracking", cv::WINDOW_NORMAL);
     cv::resizeWindow("MPPI Tracking", base_frame.cols, base_frame.rows);
 
+    std::ofstream log(log_path.c_str());
+    if (!log) {
+      std::cerr << "Could not open log: " << log_path << "\n";
+      return 1;
+    }
+    // Same schema as dubins_circle_path_tracking_example (u_accel/u_steer columns hold throttle/steer).
+    log << "t,pos_x,pos_y,yaw,vel_x,steer_angle,brake_state,u_accel,u_steer,nom_u_accel,nom_u_steer,"
+           "ref_x,ref_y,ref_yaw,ref_v,arc_s,lat_err,baseline\n";
+    log << std::scientific;
+
     // 9. Main simulation loop
     for (size_t k = 0; k < num_sim_steps; ++k) {
       const std::vector<mppi::path::PathReferenceSample> ref = ref_gen.generate(path, arcLength, kRefHorizon);
@@ -174,6 +201,7 @@ int main(int argc, char** argv)
       
       // Update importance sampling based on current nominal control
       controller.updateImportanceSampler(u_nom);
+      const DYN::control_array u_nom_step = u_nom.col(0);
 
       // Compute control sequence
       controller.computeControl(x, 1);
@@ -185,6 +213,13 @@ int main(int argc, char** argv)
       /* Video frame generation */
       const auto state_trajectory = controller.getActualStateSeq();
       const auto sampled_trajectories = controller.getSampledOutputTrajectories();
+      const auto sampled_cost_trajs = controller.getSampledCostTrajectories();
+
+      std::vector<float> rollout_costs(sampled_cost_trajs.size());
+      for (size_t i = 0; i < sampled_cost_trajs.size(); ++i)
+      {
+        rollout_costs[i] = sampled_cost_trajs[i].sum();
+      }
 
       const int state_x_idx = static_cast<int>(RacerDubinsParams::StateIndex::POS_X);
       const int state_y_idx = static_cast<int>(RacerDubinsParams::StateIndex::POS_Y);
@@ -194,7 +229,8 @@ int main(int argc, char** argv)
       auto frame = base_frame.clone();
 
       mppi::viz::drawReferencePath(frame, ref);
-      mppi::viz::drawSampledTrajectories(frame, sampled_trajectories, output_x_idx, output_y_idx, kMppiHorizon);
+      mppi::viz::drawSampledTrajectories(frame, sampled_trajectories, output_x_idx, output_y_idx, kMppiHorizon,
+                                         rollout_costs);
       mppi::viz::drawTrajectory(frame, state_trajectory, state_x_idx, state_y_idx);
       video.write(frame);
 
@@ -218,8 +254,26 @@ int main(int argc, char** argv)
       // Project state onto path to update progress
       const mppi::path::PathProjection proj = mppi::path::projectPoseOntoPath(path, x(static_cast<int>(RacerDubinsParams::StateIndex::POS_X)), x(static_cast<int>(RacerDubinsParams::StateIndex::POS_Y)), arcLength);
       arcLength = proj.arc_length_s;
+
+      const mppi::path::PathReferenceSample& r0 = ref.front();
+      const float t_end = static_cast<float>(k + 1) * kDt;
+      log << t_end << ","
+          << x(static_cast<int>(RacerDubinsParams::StateIndex::POS_X)) << ","
+          << x(static_cast<int>(RacerDubinsParams::StateIndex::POS_Y)) << ","
+          << x(static_cast<int>(RacerDubinsParams::StateIndex::YAW)) << ","
+          << x(static_cast<int>(RacerDubinsParams::StateIndex::VEL_X)) << ","
+          << x(static_cast<int>(RacerDubinsParams::StateIndex::STEER_ANGLE)) << ","
+          << x(static_cast<int>(RacerDubinsParams::StateIndex::BRAKE_STATE)) << ","
+          << u_opt.col(0)(static_cast<int>(RacerDubinsParams::ControlIndex::THROTTLE_BRAKE)) << ","
+          << u_opt.col(0)(static_cast<int>(RacerDubinsParams::ControlIndex::STEER_CMD)) << ","
+          << u_nom_step(static_cast<int>(RacerDubinsParams::ControlIndex::THROTTLE_BRAKE)) << ","
+          << u_nom_step(static_cast<int>(RacerDubinsParams::ControlIndex::STEER_CMD)) << ","
+          << r0.x << "," << r0.y << "," << r0.yaw << "," << r0.v << ","
+          << proj.arc_length_s << "," << proj.signed_lateral_error << ","
+          << static_cast<float>(controller.getBaselineCost()) << "\n";
     }
 
+    log.close();
     cost.freeCudaMem();
     return 0;
 }

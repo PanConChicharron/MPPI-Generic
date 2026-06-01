@@ -133,12 +133,7 @@ __host__ __device__ float RacerCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PA
     }
   }
 
-  float track_val = min_dist * this->params_.track_dist_scale;
-#ifdef __CUDA_ARCH__
-  track_val = fminf(track_val, this->params_.track_cost_cap);
-#else
-  track_val = std::min(track_val, this->params_.track_cost_cap);
-#endif
+  float track_val = min_dist;
 
   for (int i = 0; i < num_obstacles_; ++i)
   {
@@ -241,4 +236,82 @@ __device__ float RacerCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PARAMS_T>::
   const float y_pos = y[static_cast<int>(RacerDubinsParams::OutputIndex::BASELINK_POS_I_Y)];
   const float track_val = computeTrackValue(x, y_pos);
   return this->params_.track_coeff * track_val * 10.0F;
+}
+
+template <class CLASS_T, int NUM_TIMESTEPS, class PARAMS_T, class DYN_PARAMS_T>
+float RacerCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PARAMS_T>::computeComfortCost(
+    const Eigen::Ref<const control_array>& u, const Eigen::Ref<const output_array>& y, int timestep)
+{
+  (void)u;
+  (void)timestep;
+  const float vel = y[static_cast<int>(RacerDubinsParams::OutputIndex::TOTAL_VELOCITY)];
+  const float long_accel = y[static_cast<int>(RacerDubinsParams::OutputIndex::ACCEL_X)];
+  const float steer_angle = y[static_cast<int>(RacerDubinsParams::OutputIndex::STEER_ANGLE)];
+  const float steer_angle_rate = y[static_cast<int>(RacerDubinsParams::OutputIndex::STEER_ANGLE_RATE)];
+
+  const float phi = steer_angle / this->params_.steer_angle_scale;
+  const float cos_phi = std::cos(phi);
+  const float sec_sq_phi = 1.0F / std::max(cos_phi * cos_phi, 1.0E-6F);
+
+  // kappa = tan(phi) / L
+  const float curvature = std::tan(phi) / this->params_.wheel_base;
+  // kappa_dot = sec^2(phi) * phi_dot / L, with phi_dot = steer_angle_rate / steer_angle_scale
+  const float curvature_derivative =
+      (sec_sq_phi * steer_angle_rate) / (this->params_.wheel_base * this->params_.steer_angle_scale);
+
+  // a_y = v^2 * kappa
+  const float lateral_acceleration = vel * vel * curvature;
+  // j_y = d(a_y)/dt = 2 v a_x kappa + v^2 kappa_dot
+  const float lateral_jerk = 2.0F * vel * long_accel * curvature + vel * vel * curvature_derivative;
+
+  return this->params_.lateral_acceleration_coeff * std::abs(lateral_acceleration) +
+         this->params_.lateral_jerk_coeff * std::abs(lateral_jerk);
+}
+
+template <class CLASS_T, int NUM_TIMESTEPS, class PARAMS_T, class DYN_PARAMS_T>
+__device__ float RacerCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PARAMS_T>::computeComfortCost(float* u, float* y, int timestep)
+{
+  (void)u;
+  (void)timestep;
+  const float vel = y[static_cast<int>(RacerDubinsParams::OutputIndex::TOTAL_VELOCITY)];
+  const float long_accel = y[static_cast<int>(RacerDubinsParams::OutputIndex::ACCEL_X)];
+  const float steer_angle = y[static_cast<int>(RacerDubinsParams::OutputIndex::STEER_ANGLE)];
+  const float steer_angle_rate = y[static_cast<int>(RacerDubinsParams::OutputIndex::STEER_ANGLE_RATE)];
+
+  const float phi = steer_angle / this->params_.steer_angle_scale;
+  const float cos_phi = cosf(phi);
+  const float sec_sq_phi = 1.0F / fmaxf(cos_phi * cos_phi, 1.0E-6F);
+
+  const float curvature = tanf(phi) / this->params_.wheel_base;
+  const float curvature_derivative =
+      (sec_sq_phi * steer_angle_rate) / (this->params_.wheel_base * this->params_.steer_angle_scale);
+
+  const float lateral_acceleration = vel * vel * curvature;
+  const float lateral_jerk = 2.0F * vel * long_accel * curvature + vel * vel * curvature_derivative;
+
+  return this->params_.lateral_acceleration_coeff * fabsf(lateral_acceleration) +
+         this->params_.lateral_jerk_coeff * fabsf(lateral_jerk);
+}
+
+template <class CLASS_T, int NUM_TIMESTEPS, class PARAMS_T, class DYN_PARAMS_T>
+float RacerCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PARAMS_T>::computeRunningCost(
+    const Eigen::Ref<const output_array>& y, const Eigen::Ref<const control_array>& u, int timestep, int* crash)
+{
+  return this->computeStateCost(y, timestep, crash) + this->computeControlCost(u, timestep, crash) +
+         this->computeComfortCost(u, y, timestep);
+}
+
+template <class CLASS_T, int NUM_TIMESTEPS, class PARAMS_T, class DYN_PARAMS_T>
+__device__ float RacerCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PARAMS_T>::computeRunningCost(
+    float* y, float* u, int timestep, float* theta_c, int* crash)
+{
+  if (threadIdx.y == 0)
+  {
+    return this->computeStateCost(y, timestep, theta_c, crash) + this->computeControlCost(u, timestep, theta_c, crash) +
+           this->computeComfortCost(u, y, timestep);
+  }
+  else
+  {
+    return 0.0f;
+  }
 }
