@@ -262,7 +262,7 @@ float RacerCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PARAMS_T>::computeComf
   // a_y = v^2 * kappa
   const float lateral_acceleration = vel * vel * curvature;
   // j_y = d(a_y)/dt = 2 v a_x kappa + v^2 kappa_dot
-  const float lateral_jerk = 2.0F * vel * long_accel * curvature + vel * vel * curvature_derivative;
+  const float lateral_jerk = 3.0F * vel * long_accel * curvature + vel * vel * curvature_derivative;
 
   return this->params_.lateral_acceleration_coeff * std::abs(lateral_acceleration) +
          this->params_.lateral_jerk_coeff * std::abs(lateral_jerk);
@@ -287,7 +287,7 @@ __device__ float RacerCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PARAMS_T>::
       (sec_sq_phi * steer_angle_rate) / (this->params_.wheel_base * this->params_.steer_angle_scale);
 
   const float lateral_acceleration = vel * vel * curvature;
-  const float lateral_jerk = 2.0F * vel * long_accel * curvature + vel * vel * curvature_derivative;
+  const float lateral_jerk = 3.0F * vel * long_accel * curvature + vel * vel * curvature_derivative;
 
   return this->params_.lateral_acceleration_coeff * fabsf(lateral_acceleration) +
          this->params_.lateral_jerk_coeff * fabsf(lateral_jerk);
