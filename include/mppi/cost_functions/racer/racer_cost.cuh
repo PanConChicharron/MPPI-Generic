@@ -18,7 +18,7 @@ struct RacerCostParams : public CostParams<2>
   float crash_coeff = 10000.0F;
   float boundary_threshold = 0.8F;
   float steer_coeff = 0.0F;
-  float lateral_acceleration_coeff = 500.0F;
+  float lateral_acceleration_coeff = 50.0F;
   float lateral_jerk_coeff = 500.0F;
   float wheel_base = 0.3F;
   float steer_angle_scale = -9.1F;
