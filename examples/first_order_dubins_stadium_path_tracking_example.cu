@@ -118,14 +118,15 @@ int main(int argc, char** argv)
   model.setControlRanges(u_rng);
 
   SAMPLER::SAMPLING_PARAMS_T sp{};
-  sp.std_dev[static_cast<int>(FirstOrderDubinsBicycleParams::ControlIndex::ACCELERATION_CMD)] = 3.0F;
-  sp.std_dev[static_cast<int>(FirstOrderDubinsBicycleParams::ControlIndex::STEER_CMD)] = 0.15F;
+  sp.std_dev[static_cast<int>(FirstOrderDubinsBicycleParams::ControlIndex::ACCELERATION_CMD)] = 1.0F;
+  sp.std_dev[static_cast<int>(FirstOrderDubinsBicycleParams::ControlIndex::STEER_CMD)] = 0.05F;
   sp.sum_strides = std::max(32, (kNumRollouts + 1023) / 1024);
   SAMPLER sampler(sp);
 
   PathTrackerFeedbackParams fb_params;
-  // First-order steer lags u_steer; boost feedforward so MPPI nominal turns enough on tight corners.
-  fb_params.steer_feedforward_gain = 2.0F;
+  fb_params.lookahead_time = 0.5F;
+  fb_params.min_lookahead_distance = 1.0F;
+  fb_params.steer_feedforward_gain = 1.0F;
   FB feedback(&model, kDt);
   feedback.setParams(fb_params);
   Mppi::control_trajectory u_nom = Mppi::control_trajectory::Zero();
