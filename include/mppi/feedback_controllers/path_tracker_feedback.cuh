@@ -17,6 +17,8 @@
 
 struct PathTrackerFeedbackParams
 {
+  /** Scales atan(kappa * wheel_base) steer feedforward; use >1 if the nominal path turns too little. */
+  float steer_feedforward_gain = 1.0F;
 };
 
 template <int NUM_TIMESTEPS>
@@ -27,6 +29,7 @@ struct PathTrackerFeedbackState : GPUState
   float wheel_base = 0.3F;
   float steer_angle_scale = 1.0F;
   float steer_command_angle_scale = 1.0F;
+  float steer_feedforward_gain = 1.0F;
   float dt = 0.01F;
   int num_timesteps = NUM_TIMESTEPS;
   int ref_kappa_valid = 0;
@@ -57,11 +60,27 @@ public:
 };
 
 template <class Params>
-__host__ __device__ inline float steerCommandFromCurvature(const Params& p, float kappa)
+struct SteerCommandMagnitudeLimit
+{
+  template <class U, class = decltype(std::declval<const U&>().max_steer_angle)>
+  static __host__ __device__ float limit(const U& p)
+  {
+    return p.max_steer_angle;
+  }
+
+  static __host__ __device__ float limit(...)
+  {
+    return 1.0F;
+  }
+};
+
+template <class Params>
+__host__ __device__ inline float steerCommandFromCurvature(const Params& p, float kappa, float steer_gain = 1.0F)
 {
   const float steer_angle = atanf(kappa * p.wheel_base) * p.steer_angle_scale;
-  const float cmd = steer_angle / p.steer_command_angle_scale;
-  return fmaxf(-1.0F, fminf(1.0F, cmd));
+  const float cmd = steer_gain * steer_angle / p.steer_command_angle_scale;
+  const float lim = SteerCommandMagnitudeLimit<Params>::limit(p);
+  return fmaxf(-lim, fminf(lim, cmd));
 }
 
 template <class DYN_T, int NUM_TIMESTEPS, bool Enabled = HasBicyclePathSteer<typename DYN_T::DYN_PARAMS_T>::value>
@@ -75,7 +94,7 @@ struct PathTrackerSteerControl<DYN_T, NUM_TIMESTEPS, true>
   using state_trajectory = Eigen::Matrix<float, DYN_T::STATE_DIM, NUM_TIMESTEPS>;
 
   static control_array compute(DYN_T& dyn, const state_trajectory& goal_traj, const typename DYN_T::state_array& x_act,
-                               int t, float dt, float path_kappa, bool path_kappa_valid)
+                               int t, float dt, float path_kappa, bool path_kappa_valid, float steer_gain)
   {
     control_array u = control_array::Zero();
     constexpr int kYaw = static_cast<int>(Params::StateIndex::YAW);
@@ -93,7 +112,7 @@ struct PathTrackerSteerControl<DYN_T, NUM_TIMESTEPS, true>
       kappa = angle_utils::shortestAngularDistance(yaw0, yaw1) / ds;
     }
 
-    u(kSteer) = steerCommandFromCurvature(dyn.getParams(), kappa);
+    u(kSteer) = steerCommandFromCurvature(dyn.getParams(), kappa, steer_gain);
     return u;
   }
 };
@@ -104,7 +123,7 @@ struct PathTrackerSteerControl<DYN_T, NUM_TIMESTEPS, false>
   using control_array = typename DYN_T::control_array;
 
   static control_array compute(const DYN_T&, const Eigen::Matrix<float, DYN_T::STATE_DIM, NUM_TIMESTEPS>&,
-                               const typename DYN_T::state_array&, int, float, float, bool)
+                               const typename DYN_T::state_array&, int, float, float, bool, float)
   {
     return control_array::Zero();
   }
@@ -203,7 +222,8 @@ public:
     p.wheel_base = st.wheel_base;
     p.steer_angle_scale = st.steer_angle_scale;
     p.steer_command_angle_scale = st.steer_command_angle_scale;
-    control_output[kSteer] = mppi::feedback::detail::steerCommandFromCurvature(p, kappa);
+    control_output[kSteer] =
+        mppi::feedback::detail::steerCommandFromCurvature(p, kappa, st.steer_feedforward_gain);
   }
 };
 
@@ -246,7 +266,7 @@ public:
     }
     const float path_kappa = ref_kappa_valid_ ? ref_kappa_[static_cast<size_t>(t)] : 0.0F;
     return mppi::feedback::detail::PathTrackerSteerControl<DYN_T, NUM_TIMESTEPS>::compute(
-        *dyn_, goal_traj_, x_act, t, this->getDt(), path_kappa, ref_kappa_valid_);
+        *dyn_, goal_traj_, x_act, t, this->getDt(), path_kappa, ref_kappa_valid_, this->params_.steer_feedforward_gain);
   }
 
   void computeFeedback(const Eigen::Ref<const state_array>& init_state,
@@ -304,6 +324,7 @@ private:
     gpu_state.wheel_base = p.wheel_base;
     gpu_state.steer_angle_scale = p.steer_angle_scale;
     gpu_state.steer_command_angle_scale = p.steer_command_angle_scale;
+    gpu_state.steer_feedforward_gain = this->params_.steer_feedforward_gain;
 
     this->getHostPointer()->setFeedbackState(gpu_state);
   }

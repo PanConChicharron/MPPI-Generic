@@ -54,6 +54,9 @@ struct FirstOrderDubinsBicycleParams : public DynamicsParams
   };
 
   float wheel_base = 0.32F;
+  /** PathTrackerFeedback: steer_cmd [rad] = atan(kappa * L) * steer_angle_scale / steer_command_angle_scale */
+  float steer_angle_scale = 1.0F;
+  float steer_command_angle_scale = 1.0F;
   /** First-order lag: accel_dot = (u_accel - accel) / accel_time_constant */
   float accel_time_constant = 0.15F;
   /** First-order lag: steer_dot = (u_steer - steer) / steer_time_constant */
