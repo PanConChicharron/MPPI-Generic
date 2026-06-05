@@ -52,6 +52,25 @@ __host__ __device__ inline float distancePointToSegment(const float px, const fl
   return vectorLength(px - (x0 + t * dx), py - (y0 + t * dy));
 }
 
+/** Signed lateral offset from segment; positive = left of forward tangent. */
+__host__ __device__ inline float signedLateralOffsetPointToSegment(const float px, const float py, const float x0,
+                                                                   const float y0, const float x1, const float y1)
+{
+  const float dx = x1 - x0;
+  const float dy = y1 - y0;
+  const float len_sq = dx * dx + dy * dy;
+  if (len_sq < 1.0E-8F)
+  {
+    return px - x0;
+  }
+
+  const float t = clampUnitInterval(((px - x0) * dx + (py - y0) * dy) / len_sq);
+  const float cx = x0 + t * dx;
+  const float cy = y0 + t * dy;
+  const float len = vectorLength(dx, dy);
+  return ((px - cx) * (-dy) + (py - cy) * dx) / len;
+}
+
 __host__ __device__ inline float dot2(const float ax, const float ay, const float bx, const float by)
 {
   return ax * bx + ay * by;

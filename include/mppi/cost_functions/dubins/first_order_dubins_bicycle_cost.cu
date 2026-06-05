@@ -10,6 +10,7 @@ using O = FirstOrderDubinsBicycleParams::OutputIndex;
 using C = FirstOrderDubinsBicycleParams::ControlIndex;
 using mppi::cost::detail::distancePointToSegment;
 using mppi::cost::detail::orientedBoxesOverlap;
+using mppi::cost::detail::signedLateralOffsetPointToSegment;
 using mppi::cost::detail::vectorLength;
 
 template <class PARAMS_T>
@@ -181,6 +182,61 @@ __host__ __device__ float FirstOrderDubinsBicycleCostImpl<CLASS_T, NUM_TIMESTEPS
 }
 
 template <class CLASS_T, int NUM_TIMESTEPS, class PARAMS_T, class DYN_PARAMS_T>
+__host__ __device__ float
+FirstOrderDubinsBicycleCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PARAMS_T>::computeSignedLateralOffset(
+    const float x, const float y) const
+{
+  if (NUM_TIMESTEPS <= 1)
+  {
+    return x - ref_x_[0];
+  }
+
+  float best_abs = 1.0E8F;
+  float best_signed = 0.0F;
+  for (int i = 0; i < NUM_TIMESTEPS - 1; ++i)
+  {
+    const float signed_offset =
+        signedLateralOffsetPointToSegment(x, y, ref_x_[i], ref_y_[i], ref_x_[i + 1], ref_y_[i + 1]);
+#ifdef __CUDA_ARCH__
+    const float abs_offset = fabsf(signed_offset);
+    if (abs_offset < best_abs)
+    {
+      best_abs = abs_offset;
+      best_signed = signed_offset;
+    }
+#else
+    const float abs_offset = std::fabs(signed_offset);
+    if (abs_offset < best_abs)
+    {
+      best_abs = abs_offset;
+      best_signed = signed_offset;
+    }
+#endif
+  }
+
+  return best_signed;
+}
+
+template <class CLASS_T, int NUM_TIMESTEPS, class PARAMS_T, class DYN_PARAMS_T>
+__host__ __device__ bool FirstOrderDubinsBicycleCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PARAMS_T>::isOffRoad(
+    const float x, const float y) const
+{
+  const bool asymmetric = this->params_.boundary_threshold_left >= 0.0F ||
+                          this->params_.boundary_threshold_right >= 0.0F;
+  if (!asymmetric)
+  {
+    return computeTrackValue(x, y) >= this->params_.boundary_threshold;
+  }
+
+  const float left_limit = this->params_.boundary_threshold_left >= 0.0F ? this->params_.boundary_threshold_left
+                                                                         : this->params_.boundary_threshold;
+  const float right_limit = this->params_.boundary_threshold_right >= 0.0F ? this->params_.boundary_threshold_right
+                                                                           : this->params_.boundary_threshold;
+  const float signed_lat = computeSignedLateralOffset(x, y);
+  return signed_lat > left_limit || signed_lat < -right_limit;
+}
+
+template <class CLASS_T, int NUM_TIMESTEPS, class PARAMS_T, class DYN_PARAMS_T>
 __host__ __device__ bool
 FirstOrderDubinsBicycleCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PARAMS_T>::egoIntersectsObstacleAtStep(
     const float x, const float y, const float yaw, const int timestep) const
@@ -239,8 +295,7 @@ __host__ __device__ bool
 FirstOrderDubinsBicycleCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PARAMS_T>::detectAndLatchCrash(
     const float x, const float y, const float yaw, const int timestep, int* crash_status) const
 {
-  const float track_val = computeTrackValue(x, y);
-  const bool off_road = track_val >= this->params_.boundary_threshold;
+  const bool off_road = isOffRoad(x, y);
   const bool hit_car = egoIntersectsObstacleAtStep(x, y, yaw, timestep);
   if (off_road || hit_car)
   {

@@ -45,8 +45,9 @@ namespace
   constexpr float kLeftLaneX = mppi::cost::TwoLaneRoadLayout::kLeftLaneX;
   constexpr float kRightLaneX = mppi::cost::TwoLaneRoadLayout::kRightLaneX;
   constexpr float kLaneHalfWidth = mppi::cost::TwoLaneRoadLayout::kLaneHalfWidth;
-  /** Lateral slack from left-lane center so ego may nudge into the right lane. */
-  constexpr float kPathBoundary = 2.25F;
+  /** Stay inside left lane to the curb; allow encroachment into the adjacent right lane only. */
+  constexpr float kBoundaryLeft = kLaneHalfWidth;
+  constexpr float kBoundaryRight = (kRightLaneX - kLeftLaneX) + kLaneHalfWidth * 0.4F;
   constexpr float kRoadYStart = mppi::cost::TwoLaneRoadLayout::kRoadYStart;
   constexpr float kRoadYEnd = mppi::cost::TwoLaneRoadLayout::kRoadYEnd;
   constexpr float kInitArcLength = 1.5F;
@@ -97,8 +98,6 @@ int main(int argc, char** argv)
   mppi::path::PathReferenceGenerator ref_gen(kDt);
   ref_gen.setSpeedCap(kVMax);
   ref_gen.setTargetSpeed(kTargetSpeed);
-  ref_gen.setMergeHorizonSteps(10);
-
   const int num_sim_steps = simulationSteps(path);
   float arcLength = kInitArcLength;
 
@@ -111,7 +110,9 @@ int main(int argc, char** argv)
 
   FirstOrderDubinsBicycleCostParams<kRefHorizon> cost_params;
   cost_params.desired_speed = kTargetSpeed;
-  cost_params.boundary_threshold = kPathBoundary;
+  cost_params.boundary_threshold = kLaneHalfWidth;
+  cost_params.boundary_threshold_left = kBoundaryLeft;
+  cost_params.boundary_threshold_right = kBoundaryRight;
   mppi::cost::fillFirstOrderDubinsBicycleCostGeometry<kRefHorizon>(cost_params, dyn);
   constexpr float kEgoLength = 0.55F * 1.5F;
   constexpr float kEgoWidth = 0.28F * 1.5F;

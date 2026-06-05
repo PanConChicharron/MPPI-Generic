@@ -92,8 +92,6 @@ int main(int argc, char** argv)
   mppi::path::PathReferenceGenerator ref_gen(kDt);
   ref_gen.setSpeedCap(kVMax);
   ref_gen.setTargetSpeed(kTargetSpeed);
-  ref_gen.setMergeHorizonSteps(12);
-
   const int num_sim_steps = simulationSteps(path);
   float arcLength = kInitArcLength;
 
