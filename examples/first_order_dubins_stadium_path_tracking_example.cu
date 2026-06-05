@@ -92,9 +92,9 @@ int main(int argc, char** argv)
   mppi::rollout_csv::writeCenterlineForLog(path, log_path);
 
   constexpr float kRoadHalfWidth = 0.8F;
-  // const std::vector<mppi::cost::ParkedCarObstacle> parked_cars =
-  //     mppi::cost::generateParkedCarsAlongRoad(path, kRoadHalfWidth, seed);
-  // std::cout << "Parked cars along track: " << parked_cars.size() << "\n";
+  const std::vector<mppi::cost::ParkedCarObstacle> parked_cars =
+      mppi::cost::generateParkedCarsAlongRoad(path, kRoadHalfWidth, seed);
+  std::cout << "Parked cars along track: " << parked_cars.size() << "\n";
 
   mppi::path::PathReferenceGenerator ref_gen(kDt);
   ref_gen.setSpeedCap(kVMax);
@@ -119,7 +119,7 @@ int main(int argc, char** argv)
   mppi::cost::setFirstOrderDubinsBicycleCostEgoFootprint<kRefHorizon>(cost_params, dyn.wheel_base, kEgoLength,
                                                                     kEgoWidth);
   cost.setParams(cost_params);
-  // mppi::cost::fillFirstOrderDubinsBicycleCostParkedCars<kRefHorizon>(cost, parked_cars);
+  mppi::cost::fillFirstOrderDubinsBicycleCostParkedCars<kRefHorizon>(cost, parked_cars);
 
   const float kMaxSteer = dyn.max_steer_angle;
   std::array<float2, DYN::CONTROL_DIM> u_rng{};
@@ -165,7 +165,7 @@ int main(int argc, char** argv)
   cv::Mat base_frame = mppi::viz::makeWhiteFrame(1024, 1024);
   mppi::viz::drawRoadBoundaries(base_frame, path, kRoadHalfWidth);
   mppi::viz::drawCenterline(base_frame, path);
-  // mppi::viz::drawParkedCars(base_frame, parked_cars);
+  mppi::viz::drawParkedCars(base_frame, parked_cars);
 
   cv::VideoWriter video(video_path, cv::VideoWriter::fourcc('m', 'p', '4', 'v'), static_cast<int>(1.0F / kDt),
                         base_frame.size());
