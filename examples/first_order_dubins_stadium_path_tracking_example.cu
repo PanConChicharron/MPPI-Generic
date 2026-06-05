@@ -13,7 +13,7 @@
 #include <mppi/cost_functions/dubins/first_order_dubins_bicycle_cost_bridge.hpp>
 #include <mppi/controllers/MPPI/mppi_controller.cuh>
 #include <mppi/dynamics/dubins/first_order_dubins_bicycle.cuh>
-#include <mppi/feedback_controllers/path_tracker_feedback.cuh>
+#include <mppi/feedback_controllers/zero_feedback.cuh>
 #include <mppi/path/path_projection.hpp>
 #include <mppi/path/path_reference_generator.hpp>
 #include <mppi/path/path2d.hpp>
@@ -50,7 +50,7 @@ namespace
 
   using DYN = FirstOrderDubinsBicycle;
   using COST = FirstOrderDubinsBicycleCost<kRefHorizon>;
-  using FB = PathTrackerFeedback<DYN, kMppiHorizon>;
+  using FB = ZeroFeedback<DYN, kMppiHorizon>;
   using SAMPLER = mppi::sampling_distributions::GaussianDistribution<DYN::DYN_PARAMS_T>;
   using Mppi = VanillaMPPIController<DYN, COST, FB, kMppiHorizon, kNumRollouts, SAMPLER>;
 
@@ -58,6 +58,18 @@ namespace
   {
     const float lap_time = path.length() / kVMax;
     return static_cast<int>(std::ceil(laps * lap_time / kDt));
+  }
+
+  /** Bias u_nom accel toward holding kTargetSpeed (no engine model unlike RacerDubins). */
+  void biasNominalAcceleration(Mppi::control_trajectory& u_nom, const DYN::state_array& x,
+                               const FirstOrderDubinsBicycleParams& dyn, const float v_target)
+  {
+    constexpr int kAccel = static_cast<int>(FirstOrderDubinsBicycleParams::ControlIndex::ACCELERATION_CMD);
+    constexpr int kVel = static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::VEL_X);
+    constexpr float kAccelGain = 0.8F;
+    const float a_hold =
+        std::max(dyn.min_accel, std::min(dyn.max_accel, kAccelGain * (v_target - x(kVel))));
+    u_nom(kAccel, 0) = a_hold;
   }
 }  // namespace
 
@@ -109,28 +121,22 @@ int main(int argc, char** argv)
   cost.setParams(cost_params);
   // mppi::cost::fillFirstOrderDubinsBicycleCostParkedCars<kRefHorizon>(cost, parked_cars);
 
-  const float kMaxYawRate = kVMax / kTurnRadius;
+  const float kMaxSteer = dyn.max_steer_angle;
   std::array<float2, DYN::CONTROL_DIM> u_rng{};
   u_rng[static_cast<int>(FirstOrderDubinsBicycleParams::ControlIndex::ACCELERATION_CMD)] = { dyn.min_accel,
                                                                                              dyn.max_accel };
-  u_rng[static_cast<int>(FirstOrderDubinsBicycleParams::ControlIndex::STEER_CMD)] = { -dyn.max_steer_angle,
-                                                                                      dyn.max_steer_angle };
+  u_rng[static_cast<int>(FirstOrderDubinsBicycleParams::ControlIndex::STEER_CMD)] = { -kMaxSteer, kMaxSteer };
   model.setControlRanges(u_rng);
 
   SAMPLER::SAMPLING_PARAMS_T sp{};
-  sp.std_dev[static_cast<int>(FirstOrderDubinsBicycleParams::ControlIndex::ACCELERATION_CMD)] = 1.0F;
-  sp.std_dev[static_cast<int>(FirstOrderDubinsBicycleParams::ControlIndex::STEER_CMD)] = 0.05F;
+  sp.std_dev[static_cast<int>(FirstOrderDubinsBicycleParams::ControlIndex::ACCELERATION_CMD)] = 0.35F;
+  sp.std_dev[static_cast<int>(FirstOrderDubinsBicycleParams::ControlIndex::STEER_CMD)] = 0.06F;
   sp.sum_strides = std::max(32, (kNumRollouts + 1023) / 1024);
   SAMPLER sampler(sp);
 
-  PathTrackerFeedbackParams fb_params;
-  fb_params.lookahead_time = 0.5F;
-  fb_params.min_lookahead_distance = 1.0F;
-  fb_params.steer_feedforward_gain = 1.0F;
   FB feedback(&model, kDt);
-  feedback.setParams(fb_params);
   Mppi::control_trajectory u_nom = Mppi::control_trajectory::Zero();
-  u_nom(static_cast<int>(FirstOrderDubinsBicycleParams::ControlIndex::ACCELERATION_CMD), 0) = 0.0F;
+  Mppi::control_trajectory u_opt = u_nom;
   Mppi controller(&model, &cost, &feedback, &sampler, kDt, 1, kLambda, 0.0F, kMppiHorizon, u_nom);
   {
     auto cp = controller.getParams();
@@ -155,10 +161,6 @@ int main(int argc, char** argv)
       x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::YAW)),
       x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::VEL_X)));
   mppi::cost::fillFirstOrderDubinsBicycleCostFromPathReference<kRefHorizon>(cost, ref_init);
-  const Mppi::state_trajectory goal_traj_init =
-      mppi::feedback::goalTrajectoryFromPathReference<DYN, kMppiHorizon>(ref_init);
-  feedback.updateReference(path, ref_init);
-  feedback.applyFeedforwardToNominal(u_nom, x, goal_traj_init);
 
   cv::Mat base_frame = mppi::viz::makeWhiteFrame(1024, 1024);
   mppi::viz::drawRoadBoundaries(base_frame, path, kRoadHalfWidth);
@@ -200,10 +202,12 @@ int main(int argc, char** argv)
         x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::VEL_X)));
     mppi::cost::fillFirstOrderDubinsBicycleCostFromPathReference<kRefHorizon>(cost, ref);
 
-    const Mppi::state_trajectory goal_traj =
-        mppi::feedback::goalTrajectoryFromPathReference<DYN, kMppiHorizon>(ref);
-    feedback.updateReference(path, ref);
-    feedback.applyFeedforwardToNominal(u_nom, x, goal_traj);
+    if (k > 0)
+    {
+      u_nom.leftCols(kMppiHorizon - 1) = u_opt.rightCols(kMppiHorizon - 1);
+      u_nom.rightCols(1) = u_opt.rightCols(1);
+    }
+    biasNominalAcceleration(u_nom, x, dyn, kTargetSpeed);
 
     controller.updateImportanceSampler(u_nom);
     const DYN::control_array u_nom_step = u_nom.col(0);
@@ -214,7 +218,9 @@ int main(int argc, char** argv)
 
     step_timing.endMppi();
 
-    const Mppi::control_trajectory u_opt = controller.getControlSeq();
+    const Mppi::control_trajectory u_opt_traj = controller.getControlSeq();
+
+    u_opt = u_opt_traj;
 
     const auto state_trajectory = controller.getActualStateSeq();
     const auto sampled_trajectories = controller.getSampledOutputTrajectories();
@@ -251,7 +257,7 @@ int main(int argc, char** argv)
     DYN::state_array xdot = model.getZeroState();
     DYN::output_array y = DYN::output_array::Zero();
 
-    DYN::control_array u_apply = u_opt.col(0);
+    DYN::control_array u_apply = u_opt_traj.col(0);
     model.enforceConstraints(x, u_apply);
     model.step(x, x_next, xdot, u_apply, y, static_cast<float>(k), kDt);
 

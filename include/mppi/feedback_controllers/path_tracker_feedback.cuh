@@ -32,6 +32,8 @@ struct PathTrackerFeedbackParams
   float max_lookahead_distance = 8.0F;
   /** Scales steer feedforward; use >1 if the nominal path still turns too little. */
   float steer_feedforward_gain = 1.0F;
+  /** How many leading u_nom columns get steer replaced (rest keep MPPI warm start). */
+  int feedforward_horizon_steps = 1;
 };
 
 template <int NUM_TIMESTEPS>
@@ -432,8 +434,9 @@ public:
     computeFeedback(x, goal_traj, u_nom);
     using Params = typename DYN_T::DYN_PARAMS_T;
     constexpr int kSteer = static_cast<int>(Params::ControlIndex::STEER_CMD);
+    const int n_ff = std::max(1, std::min(this->params_.feedforward_horizon_steps, NUM_TIMESTEPS));
     TEMPLATED_FEEDBACK_STATE fb_state{};
-    for (int t = 0; t < NUM_TIMESTEPS; ++t)
+    for (int t = 0; t < n_ff; ++t)
     {
       const control_array u_ff = k_(x, goal_traj.col(t), t, fb_state);
       u_nom(kSteer, t) = u_ff(kSteer);

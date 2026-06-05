@@ -13,15 +13,15 @@ template <int NUM_TIMESTEPS>
 struct FirstOrderDubinsBicycleCostParams : public CostParams<2>
 {
   float desired_speed = 2.5F;
-  float speed_coeff = 100.0F;
+  float speed_coeff = 800.0F;
   float track_coeff = 300.0F;
   float crash_coeff = 10000.0F;
   float boundary_threshold = 0.8F;
   float accel_cmd_coeff = 0.0F;
   float steer_cmd_coeff = 0.0F;
-  float lateral_acceleration_coeff = 50.0F;
-  float lateral_jerk_coeff = 100.0F;
-  float longitudinal_jerk_coeff = 50.0F;
+  float lateral_acceleration_coeff = 10.0F;
+  float lateral_jerk_coeff = 25.0F;
+  float longitudinal_jerk_coeff = 10.0F;
   float wheel_base = 0.32F;
   float accel_time_constant = 0.15F;
   float steer_time_constant = 0.08F;
