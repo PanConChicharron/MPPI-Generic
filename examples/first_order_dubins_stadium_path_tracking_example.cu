@@ -59,18 +59,6 @@ namespace
     const float lap_time = path.length() / kVMax;
     return static_cast<int>(std::ceil(laps * lap_time / kDt));
   }
-
-  /** Bias u_nom accel toward holding kTargetSpeed (no engine model unlike RacerDubins). */
-  void biasNominalAcceleration(Mppi::control_trajectory& u_nom, const DYN::state_array& x,
-                               const FirstOrderDubinsBicycleParams& dyn, const float v_target)
-  {
-    constexpr int kAccel = static_cast<int>(FirstOrderDubinsBicycleParams::ControlIndex::ACCELERATION_CMD);
-    constexpr int kVel = static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::VEL_X);
-    constexpr float kAccelGain = 0.8F;
-    const float a_hold =
-        std::max(dyn.min_accel, std::min(dyn.max_accel, kAccelGain * (v_target - x(kVel))));
-    u_nom(kAccel, 0) = a_hold;
-  }
 }  // namespace
 
 int main(int argc, char** argv)
@@ -130,7 +118,7 @@ int main(int argc, char** argv)
 
   SAMPLER::SAMPLING_PARAMS_T sp{};
   sp.std_dev[static_cast<int>(FirstOrderDubinsBicycleParams::ControlIndex::ACCELERATION_CMD)] = 0.35F;
-  sp.std_dev[static_cast<int>(FirstOrderDubinsBicycleParams::ControlIndex::STEER_CMD)] = 0.06F;
+  sp.std_dev[static_cast<int>(FirstOrderDubinsBicycleParams::ControlIndex::STEER_CMD)] = 0.03F;
   sp.sum_strides = std::max(32, (kNumRollouts + 1023) / 1024);
   SAMPLER sampler(sp);
 
@@ -206,8 +194,8 @@ int main(int argc, char** argv)
     {
       u_nom.leftCols(kMppiHorizon - 1) = u_opt.rightCols(kMppiHorizon - 1);
       u_nom.rightCols(1) = u_opt.rightCols(1);
+      // biasNominalAcceleration(u_nom, x, dyn, kTargetSpeed);
     }
-    biasNominalAcceleration(u_nom, x, dyn, kTargetSpeed);
 
     controller.updateImportanceSampler(u_nom);
     const DYN::control_array u_nom_step = u_nom.col(0);

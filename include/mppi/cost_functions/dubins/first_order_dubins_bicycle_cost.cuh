@@ -13,14 +13,15 @@ template <int NUM_TIMESTEPS>
 struct FirstOrderDubinsBicycleCostParams : public CostParams<2>
 {
   float desired_speed = 2.5F;
-  float speed_coeff = 800.0F;
+  float speed_coeff = 3000.0F;
   float track_coeff = 300.0F;
-  float crash_coeff = 10000.0F;
+  /** Added every rollout step after crash_status is latched (off-road or parked-car hit). */
+  float crash_coeff = 100000.0F;
   float boundary_threshold = 0.8F;
   float accel_cmd_coeff = 0.0F;
   float steer_cmd_coeff = 0.0F;
-  float lateral_acceleration_coeff = 10.0F;
-  float lateral_jerk_coeff = 25.0F;
+  float lateral_acceleration_coeff = 50.0F;
+  float lateral_jerk_coeff = 100.0F;
   float longitudinal_jerk_coeff = 10.0F;
   float wheel_base = 0.32F;
   float accel_time_constant = 0.15F;
@@ -55,6 +56,12 @@ public:
   __host__ __device__ float computeTrackValue(float x, float y) const;
 
   __host__ __device__ bool egoIntersectsParkedCar(const float x, const float y, const float yaw) const;
+
+  __host__ __device__ bool isCrashLatched(const int* crash_status) const;
+
+  __host__ __device__ bool detectAndLatchCrash(const float x, const float y, const float yaw, int* crash_status) const;
+
+  __host__ __device__ float latchedCrashCost(const int* crash_status) const;
 
   float computeStateCost(const Eigen::Ref<const output_array>& y, int timestep, int* crash_status);
 
