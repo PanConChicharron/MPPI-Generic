@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numeric>
 #include <vector>
 
 namespace mppi
@@ -69,37 +70,45 @@ inline void buildObstacleTrajectoryBuffers(const std::vector<MovingCarObstacle>&
                                            std::vector<float>& y, std::vector<float>& yaw,
                                            std::vector<float>& half_length, std::vector<float>& half_width)
 {
-  const int n = static_cast<int>(std::min(cars.size(), static_cast<size_t>(64)));
+  const size_t n = std::min(cars.size(), static_cast<size_t>(64));
   const int nt = std::max(1, num_timesteps);
-  x.assign(static_cast<size_t>(n * nt), 0.0F);
-  y.assign(static_cast<size_t>(n * nt), 0.0F);
-  yaw.assign(static_cast<size_t>(n * nt), 0.0F);
-  half_length.assign(static_cast<size_t>(n), 0.0F);
-  half_width.assign(static_cast<size_t>(n), 0.0F);
+  x.assign(n * static_cast<size_t>(nt), 0.0F);
+  y.assign(n * static_cast<size_t>(nt), 0.0F);
+  yaw.assign(n * static_cast<size_t>(nt), 0.0F);
+  half_length.assign(n, 0.0F);
+  half_width.assign(n, 0.0F);
 
-  for (int i = 0; i < n; ++i)
+  std::vector<int> timesteps(static_cast<size_t>(nt));
+  std::iota(timesteps.begin(), timesteps.end(), 0);
+
+  size_t i = 0;
+  for (const MovingCarObstacle& car : cars)
   {
-    const MovingCarObstacle& car = cars[static_cast<size_t>(i)];
-    half_length[static_cast<size_t>(i)] = car.length * 0.5F;
-    half_width[static_cast<size_t>(i)] = car.width * 0.5F;
-    for (int t = 0; t < nt; ++t)
+    if (i >= n)
+    {
+      break;
+    }
+    half_length[i] = car.length * 0.5F;
+    half_width[i] = car.width * 0.5F;
+    for (const int t : timesteps)
     {
       const float world_t = horizon_start_time + static_cast<float>(t) * dt;
-      const int idx = i * nt + t;
+      const size_t idx = i * static_cast<size_t>(nt) + static_cast<size_t>(t);
       if (car.isActiveAt(world_t))
       {
         const ParkedCarObstacle pose = car.poseAt(world_t);
-        x[static_cast<size_t>(idx)] = pose.ox;
-        y[static_cast<size_t>(idx)] = pose.oy;
-        yaw[static_cast<size_t>(idx)] = pose.yaw;
+        x[idx] = pose.ox;
+        y[idx] = pose.oy;
+        yaw[idx] = pose.yaw;
       }
       else
       {
-        x[static_cast<size_t>(idx)] = -1.0E4F;
-        y[static_cast<size_t>(idx)] = -1.0E4F;
-        yaw[static_cast<size_t>(idx)] = car.yaw;
+        x[idx] = -1.0E4F;
+        y[idx] = -1.0E4F;
+        yaw[idx] = car.yaw;
       }
     }
+    ++i;
   }
 }
 
@@ -124,7 +133,13 @@ inline void appendLanePlatoon(std::vector<MovingCarObstacle>& cars, const float 
                               const float first_x, const float x_spacing, const float spawn_start,
                               const float spawn_spacing, const int count, const float length_scale = 1.0F)
 {
-  for (int i = 0; i < count; ++i)
+  if (count <= 0)
+  {
+    return;
+  }
+  std::vector<int> slots(static_cast<size_t>(count));
+  std::iota(slots.begin(), slots.end(), 0);
+  for (const int i : slots)
   {
     cars.push_back(makeCrossingCar(first_x - static_cast<float>(i) * x_spacing, y_lane, speed,
                                    spawn_start + static_cast<float>(i) * spawn_spacing, length_scale));
@@ -140,7 +155,7 @@ inline std::vector<MovingCarObstacle> defaultIntersectionCrossTraffic()
   constexpr float kSpeedSlow = 3.6F;
 
   std::vector<MovingCarObstacle> cars;
-  cars.reserve(28);
+  cars.reserve(34);
 
   // Five eastbound lanes (y), ~5 vehicles each
   detail::appendLanePlatoon(cars, -2.6F, kSpeedFast, -22.0F, 9.5F, 0.0F, 0.95F, 5);
