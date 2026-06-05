@@ -50,16 +50,25 @@ public:
 
   void setReferenceTrajectory(const float* x, const float* y, int count);
 
+  /** Static obstacles: same pose replicated at every MPPI horizon step. */
   void setOrientedBoxObstacles(const float* x, const float* y, const float* yaw, const float* half_length,
                                const float* half_width, int count);
 
+  void setOrientedBoxObstacleTrajectories(const float* x, const float* y, const float* yaw,
+                                          const float* half_length, const float* half_width, int obstacle_count,
+                                          int num_timesteps);
+
+  void clearObstacles();
+
   __host__ __device__ float computeTrackValue(float x, float y) const;
 
-  __host__ __device__ bool egoIntersectsParkedCar(const float x, const float y, const float yaw) const;
+  __host__ __device__ bool egoIntersectsObstacleAtStep(const float x, const float y, const float yaw,
+                                                       int timestep) const;
 
   __host__ __device__ bool isCrashLatched(const int* crash_status) const;
 
-  __host__ __device__ bool detectAndLatchCrash(const float x, const float y, const float yaw, int* crash_status) const;
+  __host__ __device__ bool detectAndLatchCrash(const float x, const float y, const float yaw, int timestep,
+                                             int* crash_status) const;
 
   __host__ __device__ float latchedCrashCost(const int* crash_status) const;
 
@@ -86,9 +95,9 @@ public:
   float ref_x_[NUM_TIMESTEPS] = {};
   float ref_y_[NUM_TIMESTEPS] = {};
   int num_obstacles_ = 0;
-  float obs_x_[kMaxObstacles] = {};
-  float obs_y_[kMaxObstacles] = {};
-  float obs_yaw_[kMaxObstacles] = {};
+  float obs_x_[kMaxObstacles][NUM_TIMESTEPS] = {};
+  float obs_y_[kMaxObstacles][NUM_TIMESTEPS] = {};
+  float obs_yaw_[kMaxObstacles][NUM_TIMESTEPS] = {};
   float obs_half_length_[kMaxObstacles] = {};
   float obs_half_width_[kMaxObstacles] = {};
 

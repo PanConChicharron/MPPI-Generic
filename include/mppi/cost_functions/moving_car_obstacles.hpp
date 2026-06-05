@@ -1,0 +1,165 @@
+/**
+ * Constant-velocity vehicles for time-varying OBB collision costs (approach B).
+ */
+#pragma once
+
+#include <mppi/cost_functions/parked_car_obstacles.hpp>
+
+#include <algorithm>
+#include <cmath>
+#include <vector>
+
+namespace mppi
+{
+namespace cost
+{
+
+/** Cross-traffic / dynamic vehicle with constant velocity. */
+struct MovingCarObstacle
+{
+  float x0 = 0.0F;
+  float y0 = 0.0F;
+  float vx = 0.0F;
+  float vy = 0.0F;
+  float yaw = 0.0F;
+  float length = 0.55F * 1.5F;
+  float width = 0.28F * 1.5F;
+  /** Obstacle pose is active in cost/viz when sim_time >= spawn_time. */
+  float spawn_time = 0.0F;
+
+  ParkedCarObstacle poseAt(const float t) const
+  {
+    ParkedCarObstacle car;
+    const float elapsed = t - spawn_time;
+    car.ox = x0 + vx * elapsed;
+    car.oy = y0 + vy * elapsed;
+    car.yaw = yaw;
+    car.length = length;
+    car.width = width;
+    return car;
+  }
+
+  bool isActiveAt(const float t) const
+  {
+    return t >= spawn_time;
+  }
+};
+
+/** Active vehicles at simulation time sim_time (for visualization). */
+inline std::vector<ParkedCarObstacle> movingCarPosesAt(const std::vector<MovingCarObstacle>& cars, const float sim_time)
+{
+  std::vector<ParkedCarObstacle> out;
+  out.reserve(cars.size());
+  for (const MovingCarObstacle& car : cars)
+  {
+    if (car.isActiveAt(sim_time))
+    {
+      out.push_back(car.poseAt(sim_time));
+    }
+  }
+  return out;
+}
+
+/**
+ * Fill obstacle-major trajectory buffers for MPPI horizon [0, num_timesteps).
+ * Step t uses world time horizon_start_time + t * dt.
+ */
+inline void buildObstacleTrajectoryBuffers(const std::vector<MovingCarObstacle>& cars, const float horizon_start_time,
+                                           const float dt, const int num_timesteps, std::vector<float>& x,
+                                           std::vector<float>& y, std::vector<float>& yaw,
+                                           std::vector<float>& half_length, std::vector<float>& half_width)
+{
+  const int n = static_cast<int>(std::min(cars.size(), static_cast<size_t>(64)));
+  const int nt = std::max(1, num_timesteps);
+  x.assign(static_cast<size_t>(n * nt), 0.0F);
+  y.assign(static_cast<size_t>(n * nt), 0.0F);
+  yaw.assign(static_cast<size_t>(n * nt), 0.0F);
+  half_length.assign(static_cast<size_t>(n), 0.0F);
+  half_width.assign(static_cast<size_t>(n), 0.0F);
+
+  for (int i = 0; i < n; ++i)
+  {
+    const MovingCarObstacle& car = cars[static_cast<size_t>(i)];
+    half_length[static_cast<size_t>(i)] = car.length * 0.5F;
+    half_width[static_cast<size_t>(i)] = car.width * 0.5F;
+    for (int t = 0; t < nt; ++t)
+    {
+      const float world_t = horizon_start_time + static_cast<float>(t) * dt;
+      const int idx = i * nt + t;
+      if (car.isActiveAt(world_t))
+      {
+        const ParkedCarObstacle pose = car.poseAt(world_t);
+        x[static_cast<size_t>(idx)] = pose.ox;
+        y[static_cast<size_t>(idx)] = pose.oy;
+        yaw[static_cast<size_t>(idx)] = pose.yaw;
+      }
+      else
+      {
+        x[static_cast<size_t>(idx)] = -1.0E4F;
+        y[static_cast<size_t>(idx)] = -1.0E4F;
+        yaw[static_cast<size_t>(idx)] = car.yaw;
+      }
+    }
+  }
+}
+
+namespace detail
+{
+inline MovingCarObstacle makeCrossingCar(const float x_at_spawn, const float y_lane, const float speed,
+                                         const float spawn_time, const float length_scale = 1.0F)
+{
+  MovingCarObstacle car;
+  car.x0 = x_at_spawn;
+  car.y0 = y_lane;
+  car.vx = speed;
+  car.vy = 0.0F;
+  car.yaw = 0.0F;
+  car.spawn_time = spawn_time;
+  car.length = 0.55F * 1.5F * length_scale;
+  car.width = 0.28F * 1.5F;
+  return car;
+}
+
+inline void appendLanePlatoon(std::vector<MovingCarObstacle>& cars, const float y_lane, const float speed,
+                              const float first_x, const float x_spacing, const float spawn_start,
+                              const float spawn_spacing, const int count, const float length_scale = 1.0F)
+{
+  for (int i = 0; i < count; ++i)
+  {
+    cars.push_back(makeCrossingCar(first_x - static_cast<float>(i) * x_spacing, y_lane, speed,
+                                   spawn_start + static_cast<float>(i) * spawn_spacing, length_scale));
+  }
+}
+}  // namespace detail
+
+/** Dense cross-traffic from the west (multiple lanes, staggered spawns). */
+inline std::vector<MovingCarObstacle> defaultIntersectionCrossTraffic()
+{
+  constexpr float kSpeedFast = 5.8F;
+  constexpr float kSpeedMid = 4.8F;
+  constexpr float kSpeedSlow = 3.6F;
+
+  std::vector<MovingCarObstacle> cars;
+  cars.reserve(28);
+
+  // Five eastbound lanes (y), ~5 vehicles each
+  detail::appendLanePlatoon(cars, -2.6F, kSpeedFast, -22.0F, 9.5F, 0.0F, 0.95F, 5);
+  detail::appendLanePlatoon(cars, -3.4F, kSpeedFast, -26.0F, 9.5F, 0.35F, 1.05F, 5);
+  detail::appendLanePlatoon(cars, -4.2F, kSpeedMid, -30.0F, 9.5F, 0.7F, 1.1F, 5);
+  detail::appendLanePlatoon(cars, -5.0F, kSpeedMid, -34.0F, 9.5F, 1.0F, 1.15F, 5);
+  detail::appendLanePlatoon(cars, -5.8F, kSpeedSlow, -38.0F, 9.5F, 1.3F, 1.2F, 5);
+
+  // Extra waves further west
+  detail::appendLanePlatoon(cars, -3.0F, kSpeedMid, -72.0F, 10.0F, 5.5F, 1.25F, 3);
+  detail::appendLanePlatoon(cars, -4.6F, kSpeedSlow, -76.0F, 10.0F, 6.0F, 1.3F, 3);
+
+  // Trucks / late merge
+  cars.push_back(detail::makeCrossingCar(-88.0F, -3.5F, kSpeedSlow, 7.0F, 1.3F));
+  cars.push_back(detail::makeCrossingCar(-92.0F, -5.2F, kSpeedSlow, 7.8F, 1.35F));
+  cars.push_back(detail::makeCrossingCar(-98.0F, -4.0F, kSpeedSlow, 9.0F, 1.4F));
+
+  return cars;
+}
+
+}  // namespace cost
+}  // namespace mppi

@@ -244,5 +244,221 @@ inline void drawSampledTrajectories(cv::Mat& img, const std::vector<TrajectoryMa
   }
 }
 
+/** Draw a straight cross-street segment (world coordinates). */
+inline void drawStraightCorridor(cv::Mat& img, const float x0, const float y0, const float x1, const float y1,
+                                 const float half_width, const float scale = 15.0F)
+{
+  const float dx = x1 - x0;
+  const float dy = y1 - y0;
+  const float len = std::sqrt(dx * dx + dy * dy);
+  if (len < 1.0E-6F)
+  {
+    return;
+  }
+  const float tx = dx / len;
+  const float ty = dy / len;
+  const float nx = -ty;
+  const float ny = tx;
+  const cv::Point2f c0 = worldToPixel(x0 + nx * half_width, y0 + ny * half_width, img.cols, img.rows, scale);
+  const cv::Point2f c1 = worldToPixel(x1 + nx * half_width, y1 + ny * half_width, img.cols, img.rows, scale);
+  const cv::Point2f c2 = worldToPixel(x1 - nx * half_width, y1 - ny * half_width, img.cols, img.rows, scale);
+  const cv::Point2f c3 = worldToPixel(x0 - nx * half_width, y0 - ny * half_width, img.cols, img.rows, scale);
+  std::vector<cv::Point> poly = {
+    cv::Point(static_cast<int>(c0.x), static_cast<int>(c0.y)),
+    cv::Point(static_cast<int>(c1.x), static_cast<int>(c1.y)),
+    cv::Point(static_cast<int>(c2.x), static_cast<int>(c2.y)),
+    cv::Point(static_cast<int>(c3.x), static_cast<int>(c3.y)),
+  };
+  cv::Mat overlay = img.clone();
+  const cv::Point* pts = poly.data();
+  const int n_pts = 4;
+  cv::fillPoly(overlay, &pts, &n_pts, 1, cv::Scalar(235, 245, 235));
+  cv::addWeighted(overlay, 0.35, img, 0.65, 0, img);
+  cv::line(img, poly[0], poly[1], cv::Scalar(120, 120, 120), 1, cv::LINE_AA);
+  cv::line(img, poly[2], poly[3], cv::Scalar(120, 120, 120), 1, cv::LINE_AA);
+}
+
+/** Layout for stacked time-series strips under the track view. */
+struct TimeSeriesPlotLayout
+{
+  int plot_strip_height = 200;
+  int plot_strip_count = 4;
+  int plot_margin_left = 76;
+  int plot_margin_right = 16;
+  int plot_margin_top = 26;
+  int plot_margin_bottom = 14;
+  float plot_font_scale = 0.58F;
+  int plot_line_thickness = 2;
+  /** Downscale composite for imshow so the window fits typical displays (video stays full size). */
+  int max_display_width = 1440;
+  int max_display_height = 960;
+};
+
+inline const TimeSeriesPlotLayout& defaultTimeSeriesPlotLayout()
+{
+  static const TimeSeriesPlotLayout layout{};
+  return layout;
+}
+
+inline cv::Size compositeFrameSize(const int track_width, const int track_height, const TimeSeriesPlotLayout& layout)
+{
+  return cv::Size(track_width, track_height + layout.plot_strip_count * layout.plot_strip_height);
+}
+
+/** Downscale for on-screen display; returns input unchanged if already within limits. */
+inline cv::Mat fitFrameForDisplay(const cv::Mat& frame, const int max_width, const int max_height)
+{
+  if (frame.empty() || max_width <= 0 || max_height <= 0)
+  {
+    return frame;
+  }
+  const double sx = static_cast<double>(max_width) / static_cast<double>(frame.cols);
+  const double sy = static_cast<double>(max_height) / static_cast<double>(frame.rows);
+  const double scale = std::min({ sx, sy, 1.0 });
+  if (scale >= 0.999)
+  {
+    return frame;
+  }
+  cv::Mat display;
+  cv::resize(frame, display, cv::Size(), scale, scale, cv::INTER_AREA);
+  return display;
+}
+
+inline void showCompositeFrame(const char* window_name, const cv::Mat& composite, const TimeSeriesPlotLayout& layout)
+{
+  const cv::Mat display =
+      fitFrameForDisplay(composite, layout.max_display_width, layout.max_display_height);
+  cv::imshow(window_name, display);
+  cv::resizeWindow(window_name, display.cols, display.rows);
+  cv::setWindowProperty(window_name, cv::WND_PROP_ASPECT_RATIO, cv::WINDOW_KEEPRATIO);
+}
+
+/** Rolling signals for strip-chart overlays on path-tracking videos. */
+struct RunningTimeSeries
+{
+  std::vector<float> t;
+  std::vector<float> vel;
+  std::vector<float> accel;
+  std::vector<float> steer_cmd;
+  std::vector<float> steer_state;
+
+  void push(const float time, const float velocity, const float acceleration, const float steer_command,
+            const float steer_angle, const size_t max_points = 400)
+  {
+    t.push_back(time);
+    vel.push_back(velocity);
+    accel.push_back(acceleration);
+    steer_cmd.push_back(steer_command);
+    steer_state.push_back(steer_angle);
+    if (t.size() > max_points)
+    {
+      const size_t drop = t.size() - max_points;
+      t.erase(t.begin(), t.begin() + static_cast<std::ptrdiff_t>(drop));
+      vel.erase(vel.begin(), vel.begin() + static_cast<std::ptrdiff_t>(drop));
+      accel.erase(accel.begin(), accel.begin() + static_cast<std::ptrdiff_t>(drop));
+      steer_cmd.erase(steer_cmd.begin(), steer_cmd.begin() + static_cast<std::ptrdiff_t>(drop));
+      steer_state.erase(steer_state.begin(), steer_state.begin() + static_cast<std::ptrdiff_t>(drop));
+    }
+  }
+};
+
+inline void drawTimeSeriesStrip(cv::Mat& strip, const std::vector<float>& t, const std::vector<float>& y,
+                                const float y_min, const float y_max, const cv::Scalar& color, const char* label,
+                                const TimeSeriesPlotLayout& layout, const float ref_line = NAN,
+                                const cv::Scalar& ref_color = cv::Scalar(180, 180, 180))
+{
+  strip.setTo(cv::Scalar(252, 252, 252));
+  const int w = strip.cols;
+  const int h = strip.rows;
+  const int margin_l = layout.plot_margin_left;
+  const int margin_r = layout.plot_margin_right;
+  const int margin_t = layout.plot_margin_top;
+  const int margin_b = layout.plot_margin_bottom;
+  const int plot_w = std::max(1, w - margin_l - margin_r);
+  const int plot_h = std::max(1, h - margin_t - margin_b);
+  const int axis_thickness = std::max(1, layout.plot_line_thickness - 1);
+  const int data_thickness = layout.plot_line_thickness;
+
+  cv::line(strip, cv::Point(margin_l, margin_t), cv::Point(margin_l, margin_t + plot_h), cv::Scalar(200, 200, 200),
+           axis_thickness);
+  cv::line(strip, cv::Point(margin_l, margin_t + plot_h), cv::Point(margin_l + plot_w, margin_t + plot_h),
+           cv::Scalar(200, 200, 200), axis_thickness);
+  cv::putText(strip, label, cv::Point(8, margin_t - 8), cv::FONT_HERSHEY_SIMPLEX, layout.plot_font_scale,
+              cv::Scalar(30, 30, 30), 1, cv::LINE_AA);
+
+  const float y_span = std::max(y_max - y_min, 1.0E-6F);
+  auto to_px = [&](const float tv, const float yv) {
+    const float t0 = t.front();
+    const float t1 = t.back();
+    const float t_span = std::max(t1 - t0, 1.0E-6F);
+    const float u = (tv - t0) / t_span;
+    const float v = (yv - y_min) / y_span;
+    const int px = margin_l + static_cast<int>(u * static_cast<float>(plot_w));
+    const int py = margin_t + plot_h - static_cast<int>(v * static_cast<float>(plot_h));
+    return cv::Point(px, py);
+  };
+
+  if (!std::isnan(ref_line) && ref_line >= y_min && ref_line <= y_max)
+  {
+    const cv::Point p0 = to_px(t.front(), ref_line);
+    const cv::Point p1 = to_px(t.back(), ref_line);
+    cv::line(strip, p0, p1, ref_color, data_thickness, cv::LINE_AA);
+  }
+
+  if (t.size() >= 2)
+  {
+    for (size_t i = 1; i < t.size(); ++i)
+    {
+      cv::line(strip, to_px(t[i - 1], y[i - 1]), to_px(t[i], y[i]), color, data_thickness, cv::LINE_AA);
+    }
+  }
+}
+
+/** Stack track view (top) and four signal strips below (full resolution for video). */
+inline cv::Mat composeFrameWithTimeSeriesPlots(const cv::Mat& track_frame, const RunningTimeSeries& history,
+                                               const float vel_ref, const float vel_max, const float accel_min,
+                                               const float accel_max, const float steer_max,
+                                               const TimeSeriesPlotLayout& layout = defaultTimeSeriesPlotLayout())
+{
+  const int strip_h = layout.plot_strip_height;
+  const int total_h = track_frame.rows + layout.plot_strip_count * strip_h;
+  cv::Mat out(total_h, track_frame.cols, CV_8UC3, cv::Scalar(255, 255, 255));
+  track_frame.copyTo(out(cv::Rect(0, 0, track_frame.cols, track_frame.rows)));
+
+  if (history.t.size() < 2)
+  {
+    return out;
+  }
+
+  const cv::Scalar k_vel(200, 120, 0);
+  const cv::Scalar k_accel(180, 60, 60);
+  const cv::Scalar k_steer_cmd(60, 60, 200);
+  const cv::Scalar k_steer_state(60, 160, 60);
+
+  int y_off = track_frame.rows;
+  cv::Mat strip_vel(strip_h, track_frame.cols, CV_8UC3);
+  drawTimeSeriesStrip(strip_vel, history.t, history.vel, 0.0F, vel_max, k_vel, "velocity [m/s]", layout, vel_ref);
+  strip_vel.copyTo(out(cv::Rect(0, y_off, track_frame.cols, strip_h)));
+  y_off += strip_h;
+
+  cv::Mat strip_accel(strip_h, track_frame.cols, CV_8UC3);
+  drawTimeSeriesStrip(strip_accel, history.t, history.accel, accel_min, accel_max, k_accel, "accel cmd [m/s^2]", layout);
+  strip_accel.copyTo(out(cv::Rect(0, y_off, track_frame.cols, strip_h)));
+  y_off += strip_h;
+
+  cv::Mat strip_steer_cmd(strip_h, track_frame.cols, CV_8UC3);
+  drawTimeSeriesStrip(strip_steer_cmd, history.t, history.steer_cmd, -steer_max, steer_max, k_steer_cmd,
+                      "steer cmd [rad]", layout);
+  strip_steer_cmd.copyTo(out(cv::Rect(0, y_off, track_frame.cols, strip_h)));
+  y_off += strip_h;
+
+  cv::Mat strip_steer_state(strip_h, track_frame.cols, CV_8UC3);
+  drawTimeSeriesStrip(strip_steer_state, history.t, history.steer_state, -steer_max, steer_max, k_steer_state,
+                      "steer state [rad]", layout);
+  strip_steer_state.copyTo(out(cv::Rect(0, y_off, track_frame.cols, strip_h)));
+
+  return out;
+}
+
 }  // namespace viz
 }  // namespace mppi

@@ -61,6 +61,16 @@ inline void fillFirstOrderDubinsBicycleCostParkedCars(FirstOrderDubinsBicycleCos
   cost.setOrientedBoxObstacles(obs_x, obs_y, obs_yaw, obs_half_length, obs_half_width, n);
 }
 
+/** Per-horizon obstacle poses: buffers sized obstacle_count * num_timesteps (obstacle-major). */
+template <int NUM_TIMESTEPS>
+inline void fillFirstOrderDubinsBicycleCostObstacleTrajectories(FirstOrderDubinsBicycleCost<NUM_TIMESTEPS>& cost,
+                                                                const float* x, const float* y, const float* yaw,
+                                                                const float* half_length, const float* half_width,
+                                                                const int obstacle_count, const int num_timesteps)
+{
+  cost.setOrientedBoxObstacleTrajectories(x, y, yaw, half_length, half_width, obstacle_count, num_timesteps);
+}
+
 template <int NUM_TIMESTEPS>
 inline void fillFirstOrderDubinsBicycleCostFromPathReference(
     FirstOrderDubinsBicycleCost<NUM_TIMESTEPS>& cost, const std::vector<mppi::path::PathReferenceSample>& ref)

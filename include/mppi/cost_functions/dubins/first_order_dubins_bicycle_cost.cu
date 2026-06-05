@@ -105,12 +105,51 @@ void FirstOrderDubinsBicycleCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PARAM
   num_obstacles_ = n;
   for (int i = 0; i < n; ++i)
   {
-    obs_x_[i] = x[i];
-    obs_y_[i] = y[i];
-    obs_yaw_[i] = yaw[i];
     obs_half_length_[i] = half_length[i];
     obs_half_width_[i] = half_width[i];
+    for (int t = 0; t < NUM_TIMESTEPS; ++t)
+    {
+      obs_x_[i][t] = x[i];
+      obs_y_[i][t] = y[i];
+      obs_yaw_[i][t] = yaw[i];
+    }
   }
+  dataToDevice();
+}
+
+template <class CLASS_T, int NUM_TIMESTEPS, class PARAMS_T, class DYN_PARAMS_T>
+void FirstOrderDubinsBicycleCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PARAMS_T>::setOrientedBoxObstacleTrajectories(
+    const float* x, const float* y, const float* yaw, const float* half_length, const float* half_width,
+    const int obstacle_count, const int num_timesteps)
+{
+  const int n = std::max(0, std::min(obstacle_count, kMaxObstacles));
+  const int nt = std::max(0, std::min(num_timesteps, NUM_TIMESTEPS));
+  num_obstacles_ = n;
+  for (int i = 0; i < n; ++i)
+  {
+    obs_half_length_[i] = half_length[i];
+    obs_half_width_[i] = half_width[i];
+    for (int t = 0; t < nt; ++t)
+    {
+      const int idx = i * nt + t;
+      obs_x_[i][t] = x[idx];
+      obs_y_[i][t] = y[idx];
+      obs_yaw_[i][t] = yaw[idx];
+    }
+    for (int t = nt; t < NUM_TIMESTEPS; ++t)
+    {
+      obs_x_[i][t] = obs_x_[i][nt - 1];
+      obs_y_[i][t] = obs_y_[i][nt - 1];
+      obs_yaw_[i][t] = obs_yaw_[i][nt - 1];
+    }
+  }
+  dataToDevice();
+}
+
+template <class CLASS_T, int NUM_TIMESTEPS, class PARAMS_T, class DYN_PARAMS_T>
+void FirstOrderDubinsBicycleCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PARAMS_T>::clearObstacles()
+{
+  num_obstacles_ = 0;
   dataToDevice();
 }
 
@@ -142,9 +181,20 @@ __host__ __device__ float FirstOrderDubinsBicycleCostImpl<CLASS_T, NUM_TIMESTEPS
 }
 
 template <class CLASS_T, int NUM_TIMESTEPS, class PARAMS_T, class DYN_PARAMS_T>
-__host__ __device__ bool FirstOrderDubinsBicycleCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PARAMS_T>::egoIntersectsParkedCar(
-    const float x, const float y, const float yaw) const
+__host__ __device__ bool
+FirstOrderDubinsBicycleCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PARAMS_T>::egoIntersectsObstacleAtStep(
+    const float x, const float y, const float yaw, const int timestep) const
 {
+  int t = timestep;
+  if (t < 0)
+  {
+    t = 0;
+  }
+  else if (t >= NUM_TIMESTEPS)
+  {
+    t = NUM_TIMESTEPS - 1;
+  }
+
 #ifdef __CUDA_ARCH__
   const float ego_cos = cosf(yaw);
   const float ego_sin = sinf(yaw);
@@ -160,14 +210,14 @@ __host__ __device__ bool FirstOrderDubinsBicycleCostImpl<CLASS_T, NUM_TIMESTEPS,
   for (int i = 0; i < num_obstacles_; ++i)
   {
 #ifdef __CUDA_ARCH__
-    const float obs_cos = cosf(obs_yaw_[i]);
-    const float obs_sin = sinf(obs_yaw_[i]);
+    const float obs_cos = cosf(obs_yaw_[i][t]);
+    const float obs_sin = sinf(obs_yaw_[i][t]);
 #else
-    const float obs_cos = std::cos(obs_yaw_[i]);
-    const float obs_sin = std::sin(obs_yaw_[i]);
+    const float obs_cos = std::cos(obs_yaw_[i][t]);
+    const float obs_sin = std::sin(obs_yaw_[i][t]);
 #endif
-    if (orientedBoxesOverlap(ego_cx, ego_cy, ego_cos, ego_sin, ego_hl, ego_hw, obs_x_[i], obs_y_[i], obs_cos, obs_sin,
-                             obs_half_length_[i], obs_half_width_[i]))
+    if (orientedBoxesOverlap(ego_cx, ego_cy, ego_cos, ego_sin, ego_hl, ego_hw, obs_x_[i][t], obs_y_[i][t], obs_cos,
+                             obs_sin, obs_half_length_[i], obs_half_width_[i]))
     {
       return true;
     }
@@ -186,11 +236,11 @@ FirstOrderDubinsBicycleCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PARAMS_T>:
 template <class CLASS_T, int NUM_TIMESTEPS, class PARAMS_T, class DYN_PARAMS_T>
 __host__ __device__ bool
 FirstOrderDubinsBicycleCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PARAMS_T>::detectAndLatchCrash(
-    const float x, const float y, const float yaw, int* crash_status) const
+    const float x, const float y, const float yaw, const int timestep, int* crash_status) const
 {
   const float track_val = computeTrackValue(x, y);
   const bool off_road = track_val >= this->params_.boundary_threshold;
-  const bool hit_car = egoIntersectsParkedCar(x, y, yaw);
+  const bool hit_car = egoIntersectsObstacleAtStep(x, y, yaw, timestep);
   if (off_road || hit_car)
   {
     if (crash_status != nullptr)
@@ -214,7 +264,6 @@ template <class CLASS_T, int NUM_TIMESTEPS, class PARAMS_T, class DYN_PARAMS_T>
 __device__ float FirstOrderDubinsBicycleCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PARAMS_T>::computeStateCost(
     float* y, int timestep, float* theta_c, int* crash_status)
 {
-  (void)timestep;
   (void)theta_c;
 
   if (isCrashLatched(crash_status))
@@ -227,7 +276,7 @@ __device__ float FirstOrderDubinsBicycleCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_
   const float yaw = y[static_cast<int>(O::YAW)];
   const float vel = y[static_cast<int>(O::TOTAL_VELOCITY)];
 
-  if (detectAndLatchCrash(x_pos, y_pos, yaw, crash_status))
+  if (detectAndLatchCrash(x_pos, y_pos, yaw, timestep, crash_status))
   {
     return this->params_.crash_coeff;
   }
@@ -243,8 +292,6 @@ template <class CLASS_T, int NUM_TIMESTEPS, class PARAMS_T, class DYN_PARAMS_T>
 float FirstOrderDubinsBicycleCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PARAMS_T>::computeStateCost(
     const Eigen::Ref<const output_array>& y, int timestep, int* crash_status)
 {
-  (void)timestep;
-
   if (isCrashLatched(crash_status))
   {
     return this->params_.crash_coeff;
@@ -255,7 +302,7 @@ float FirstOrderDubinsBicycleCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PARA
   const float yaw = y[static_cast<int>(O::YAW)];
   const float vel = y[static_cast<int>(O::TOTAL_VELOCITY)];
 
-  if (detectAndLatchCrash(x_pos, y_pos, yaw, crash_status))
+  if (detectAndLatchCrash(x_pos, y_pos, yaw, timestep, crash_status))
   {
     return this->params_.crash_coeff;
   }
