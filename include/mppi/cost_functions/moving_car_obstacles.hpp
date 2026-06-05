@@ -203,5 +203,48 @@ inline std::vector<MovingCarObstacle> intersectionGiantBlocker()
   return { blocker };
 }
 
+/** Shared compact two-lane straight-road layout (+y forward, right lane at +x). */
+struct TwoLaneRoadLayout
+{
+  static constexpr float kRightLaneX = 0.9F;
+  static constexpr float kLeftLaneX = -0.9F;
+  static constexpr float kLaneHalfWidth = 0.85F;
+  static constexpr float kRoadYaw = 1.5707963267948966F;
+  static constexpr float kRoadYStart = -10.0F;
+  static constexpr float kRoadYEnd = 32.0F;
+};
+
+/**
+ * Left-lane ego goes around a stopped vehicle intruding from the left curb by nudging into
+ * the right lane, while a faster vehicle in the right lane approaches from behind.
+ */
+inline std::vector<MovingCarObstacle> twoLaneDoubleParkAndRearApproach()
+{
+  std::vector<MovingCarObstacle> obstacles;
+  obstacles.reserve(2);
+
+  MovingCarObstacle double_parked;
+  double_parked.x0 = TwoLaneRoadLayout::kLeftLaneX - 0.58F;
+  double_parked.y0 = 11.0F;
+  double_parked.vx = 0.0F;
+  double_parked.vy = 0.0F;
+  double_parked.yaw = TwoLaneRoadLayout::kRoadYaw;
+  double_parked.spawn_time = 0.0F;
+  double_parked.length = 0.55F * 1.5F * 1.08F;
+  double_parked.width = 0.28F * 1.5F * 1.12F;
+
+  MovingCarObstacle rear_right_lane;
+  rear_right_lane.x0 = TwoLaneRoadLayout::kRightLaneX;
+  rear_right_lane.y0 = -17.0F;
+  rear_right_lane.vx = 0.0F;
+  rear_right_lane.vy = 3.5F;
+  rear_right_lane.yaw = TwoLaneRoadLayout::kRoadYaw;
+  rear_right_lane.spawn_time = 0.0F;
+
+  obstacles.push_back(double_parked);
+  obstacles.push_back(rear_right_lane);
+  return obstacles;
+}
+
 }  // namespace cost
 }  // namespace mppi
