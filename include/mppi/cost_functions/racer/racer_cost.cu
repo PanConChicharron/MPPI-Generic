@@ -144,8 +144,9 @@ __host__ __device__ bool RacerCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PAR
 #endif
   const float ego_cx = x + this->params_.ego_axle_to_box_center * ego_cos;
   const float ego_cy = y + this->params_.ego_axle_to_box_center * ego_sin;
-  const float ego_hl = this->params_.ego_length * 0.5F;
-  const float ego_hw = this->params_.ego_width * 0.5F;
+  const float margin = this->params_.obstacle_collision_margin;
+  const float ego_hl = this->params_.ego_length * 0.5F + margin;
+  const float ego_hw = this->params_.ego_width * 0.5F + margin;
 
   for (int i = 0; i < num_obstacles_; ++i)
   {

@@ -30,6 +30,8 @@ struct FirstOrderDubinsBicycleCostParams : public CostParams<2>
   float ego_length = 0.55F * 1.5F;
   float ego_width = 0.28F * 1.5F;
   float ego_axle_to_box_center = 0.2F;
+  /** Added to ego half-length/width in OBB collision test (~standoff to obstacle surfaces). */
+  float obstacle_collision_margin = 0.2F;
 };
 
 template <class CLASS_T, int NUM_TIMESTEPS,

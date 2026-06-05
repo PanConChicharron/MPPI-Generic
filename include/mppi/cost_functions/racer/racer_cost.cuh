@@ -26,6 +26,7 @@ struct RacerCostParams : public CostParams<2>
   float ego_length = 0.55*1.5F;
   float ego_width = 0.28*1.5F;
   float ego_axle_to_box_center = 0.2F;
+  float obstacle_collision_margin = 0.2F;
 };
 
 template <class CLASS_T, int NUM_TIMESTEPS, class PARAMS_T = RacerCostParams<NUM_TIMESTEPS>,

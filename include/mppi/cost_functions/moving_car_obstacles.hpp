@@ -147,33 +147,60 @@ inline void appendLanePlatoon(std::vector<MovingCarObstacle>& cars, const float 
 }
 }  // namespace detail
 
-/** Dense cross-traffic from the west (multiple lanes, staggered spawns). */
+/** Dense cross-traffic from the west (up to kMaxObstacles = 64 in first-order Dubins cost). */
 inline std::vector<MovingCarObstacle> defaultIntersectionCrossTraffic()
 {
   constexpr float kSpeedFast = 5.8F;
   constexpr float kSpeedMid = 4.8F;
   constexpr float kSpeedSlow = 3.6F;
+  constexpr float kLaneSpacing = 8.5F;
 
   std::vector<MovingCarObstacle> cars;
-  cars.reserve(34);
+  cars.reserve(64);
 
-  // Five eastbound lanes (y), ~5 vehicles each
-  detail::appendLanePlatoon(cars, -2.6F, kSpeedFast, -22.0F, 9.5F, 0.0F, 0.95F, 5);
-  detail::appendLanePlatoon(cars, -3.4F, kSpeedFast, -26.0F, 9.5F, 0.35F, 1.05F, 5);
-  detail::appendLanePlatoon(cars, -4.2F, kSpeedMid, -30.0F, 9.5F, 0.7F, 1.1F, 5);
-  detail::appendLanePlatoon(cars, -5.0F, kSpeedMid, -34.0F, 9.5F, 1.0F, 1.15F, 5);
-  detail::appendLanePlatoon(cars, -5.8F, kSpeedSlow, -38.0F, 9.5F, 1.3F, 1.2F, 5);
+  // Six eastbound lanes, seven vehicles each (42)
+  detail::appendLanePlatoon(cars, -2.2F, kSpeedFast, -16.0F, kLaneSpacing, 0.0F, 0.82F, 7);
+  detail::appendLanePlatoon(cars, -2.9F, kSpeedFast, -18.0F, kLaneSpacing, 0.15F, 0.88F, 7);
+  detail::appendLanePlatoon(cars, -3.6F, kSpeedFast, -22.0F, kLaneSpacing, 0.35F, 0.92F, 7);
+  detail::appendLanePlatoon(cars, -4.4F, kSpeedMid, -26.0F, kLaneSpacing, 0.55F, 0.98F, 7);
+  detail::appendLanePlatoon(cars, -5.2F, kSpeedMid, -30.0F, kLaneSpacing, 0.75F, 1.02F, 7);
+  detail::appendLanePlatoon(cars, -6.0F, kSpeedSlow, -34.0F, kLaneSpacing, 0.95F, 1.08F, 7);
 
-  // Extra waves further west
-  detail::appendLanePlatoon(cars, -3.0F, kSpeedMid, -72.0F, 10.0F, 5.5F, 1.25F, 3);
-  detail::appendLanePlatoon(cars, -4.6F, kSpeedSlow, -76.0F, 10.0F, 6.0F, 1.3F, 3);
+  // Five distant waves (20)
+  detail::appendLanePlatoon(cars, -2.6F, kSpeedMid, -64.0F, 9.0F, 4.2F, 1.05F, 4);
+  detail::appendLanePlatoon(cars, -3.3F, kSpeedMid, -68.0F, 9.0F, 4.6F, 1.1F, 4);
+  detail::appendLanePlatoon(cars, -4.1F, kSpeedMid, -72.0F, 9.0F, 5.0F, 1.12F, 4);
+  detail::appendLanePlatoon(cars, -5.0F, kSpeedSlow, -76.0F, 9.0F, 5.4F, 1.15F, 4);
+  detail::appendLanePlatoon(cars, -5.8F, kSpeedSlow, -80.0F, 9.0F, 5.8F, 1.18F, 4);
 
-  // Trucks / late merge
-  cars.push_back(detail::makeCrossingCar(-88.0F, -3.5F, kSpeedSlow, 7.0F, 1.3F));
-  cars.push_back(detail::makeCrossingCar(-92.0F, -5.2F, kSpeedSlow, 7.8F, 1.35F));
-  cars.push_back(detail::makeCrossingCar(-98.0F, -4.0F, kSpeedSlow, 9.0F, 1.4F));
+  // Late heavy vehicles (2) — fills obstacle budget at 64
+  cars.push_back(detail::makeCrossingCar(-92.0F, -3.8F, kSpeedSlow, 6.8F, 1.35F));
+  cars.push_back(detail::makeCrossingCar(-98.0F, -5.4F, kSpeedSlow, 8.5F, 1.4F));
 
   return cars;
+}
+
+/**
+ * One absurdly large eastbound vehicle timed for the left-turn intersection (~s≈22, ~7–8 s @ 3 m/s).
+ * Center pose is rear-axle box center; length is along +x. East edge at t: x0 + vx*t + length/2.
+ */
+inline std::vector<MovingCarObstacle> intersectionGiantBlocker()
+{
+  constexpr float kEgoApproachTime = 7.5F;
+  constexpr float kGiantSpeed = 3.4F;
+  constexpr float kGiantLength = 52.0F;
+  constexpr float kCenterAtApproach = -8.0F;
+
+  MovingCarObstacle blocker;
+  blocker.x0 = kCenterAtApproach - kGiantSpeed * kEgoApproachTime;
+  blocker.y0 = -4.0F;
+  blocker.vx = kGiantSpeed;
+  blocker.vy = 0.0F;
+  blocker.yaw = 0.0F;
+  blocker.spawn_time = 0.0F;
+  blocker.length = kGiantLength;
+  blocker.width = 18.0F;
+  return { blocker };
 }
 
 }  // namespace cost
