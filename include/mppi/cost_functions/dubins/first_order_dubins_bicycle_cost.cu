@@ -341,25 +341,17 @@ template <class CLASS_T, int NUM_TIMESTEPS, class PARAMS_T, class DYN_PARAMS_T>
 float FirstOrderDubinsBicycleCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PARAMS_T>::computeStateCost(
     const Eigen::Ref<const output_array>& y, int timestep, int* crash_status)
 {
-  if (isCrashLatched(crash_status))
-  {
-    return latchedCrashCost(crash_status);
-  }
-
   const float x_pos = y[static_cast<int>(O::BASELINK_POS_I_X)];
   const float y_pos = y[static_cast<int>(O::BASELINK_POS_I_Y)];
   const float yaw = y[static_cast<int>(O::YAW)];
   const float vel = y[static_cast<int>(O::TOTAL_VELOCITY)];
 
-  if (detectAndLatchCrash(x_pos, y_pos, yaw, timestep, crash_status))
-  {
-    return latchedCrashCost(crash_status);
-  }
-
   const float track_val = computeTrackValue(x_pos, y_pos);
   const float vel_diff = vel - this->params_.desired_speed;
   const float speed_cost = this->params_.speed_coeff * (vel_diff * vel_diff);
   const float track_cost = this->params_.track_coeff * track_val;
+  const float crash_cost = isCrashLatched(crash_status) || detectAndLatchCrash(x_pos, y_pos, yaw, timestep, crash_status) ? latchedCrashCost(crash_status) : 0.0F;
+
   return speed_cost + track_cost;
 }
 
