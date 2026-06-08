@@ -224,14 +224,14 @@ inline std::vector<MovingCarObstacle> twoLaneDoubleParkAndRearApproach()
   obstacles.reserve(2);
 
   MovingCarObstacle double_parked;
-  double_parked.x0 = TwoLaneRoadLayout::kLeftLaneX - 0.58F;
+  double_parked.x0 = TwoLaneRoadLayout::kLeftLaneX;
   double_parked.y0 = 11.0F;
   double_parked.vx = 0.0F;
   double_parked.vy = 0.0F;
   double_parked.yaw = TwoLaneRoadLayout::kRoadYaw;
   double_parked.spawn_time = 0.0F;
   double_parked.length = 0.55F * 1.5F * 1.08F;
-  double_parked.width = 0.28F * 1.5F * 1.12F;
+  double_parked.width = 0.28F * 1.5F * 1.12F * 2.0F;
 
   MovingCarObstacle rear_right_lane;
   rear_right_lane.x0 = TwoLaneRoadLayout::kRightLaneX-0.5F;
@@ -240,6 +240,8 @@ inline std::vector<MovingCarObstacle> twoLaneDoubleParkAndRearApproach()
   rear_right_lane.vy = 3.5F;
   rear_right_lane.yaw = TwoLaneRoadLayout::kRoadYaw;
   rear_right_lane.spawn_time = 0.0F;
+  rear_right_lane.length = 0.55F * 1.5F * 10.0F;
+  rear_right_lane.width = 0.28F * 1.5F * 1.12F;
 
   obstacles.push_back(double_parked);
   obstacles.push_back(rear_right_lane);
