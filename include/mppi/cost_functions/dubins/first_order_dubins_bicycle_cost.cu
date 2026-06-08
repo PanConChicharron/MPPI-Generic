@@ -297,11 +297,12 @@ FirstOrderDubinsBicycleCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PARAMS_T>:
 {
   const bool off_road = isOffRoad(x, y);
   const bool hit_car = egoIntersectsObstacleAtStep(x, y, yaw, timestep);
-  if (off_road || hit_car)
+  const int violations = static_cast<int>(off_road) + static_cast<int>(hit_car);
+  if (violations > 0)
   {
     if (crash_status != nullptr)
     {
-      crash_status[0] = 1;
+      crash_status[0] = violations;
     }
     return true;
   }
@@ -313,7 +314,7 @@ __host__ __device__ float
 FirstOrderDubinsBicycleCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PARAMS_T>::latchedCrashCost(
     const int* crash_status) const
 {
-  return isCrashLatched(crash_status) ? this->params_.crash_coeff : 0.0F;
+  return isCrashLatched(crash_status) ? static_cast<float>(crash_status[0]) * this->params_.crash_coeff : 0.0F;
 }
 
 template <class CLASS_T, int NUM_TIMESTEPS, class PARAMS_T, class DYN_PARAMS_T>
@@ -322,26 +323,18 @@ __device__ float FirstOrderDubinsBicycleCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_
 {
   (void)theta_c;
 
-  if (isCrashLatched(crash_status))
-  {
-    return this->params_.crash_coeff;
-  }
-
   const float x_pos = y[static_cast<int>(O::BASELINK_POS_I_X)];
   const float y_pos = y[static_cast<int>(O::BASELINK_POS_I_Y)];
   const float yaw = y[static_cast<int>(O::YAW)];
   const float vel = y[static_cast<int>(O::TOTAL_VELOCITY)];
 
-  if (detectAndLatchCrash(x_pos, y_pos, yaw, timestep, crash_status))
-  {
-    return this->params_.crash_coeff;
-  }
-
   const float track_val = computeTrackValue(x_pos, y_pos);
   const float vel_diff = vel - this->params_.desired_speed;
   const float speed_cost = this->params_.speed_coeff * (vel_diff * vel_diff);
   const float track_cost = this->params_.track_coeff * track_val;
-  return speed_cost + track_cost;
+  const float crash_cost = isCrashLatched(crash_status) || detectAndLatchCrash(x_pos, y_pos, yaw, timestep, crash_status) ? latchedCrashCost(crash_status) : 0.0F;
+
+  return speed_cost + track_cost + crash_cost;
 }
 
 template <class CLASS_T, int NUM_TIMESTEPS, class PARAMS_T, class DYN_PARAMS_T>
@@ -350,7 +343,7 @@ float FirstOrderDubinsBicycleCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PARA
 {
   if (isCrashLatched(crash_status))
   {
-    return this->params_.crash_coeff;
+    return latchedCrashCost(crash_status);
   }
 
   const float x_pos = y[static_cast<int>(O::BASELINK_POS_I_X)];
@@ -360,7 +353,7 @@ float FirstOrderDubinsBicycleCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PARA
 
   if (detectAndLatchCrash(x_pos, y_pos, yaw, timestep, crash_status))
   {
-    return this->params_.crash_coeff;
+    return latchedCrashCost(crash_status);
   }
 
   const float track_val = computeTrackValue(x_pos, y_pos);
@@ -439,7 +432,7 @@ float FirstOrderDubinsBicycleCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PARA
 {
   if (isCrashLatched(crash))
   {
-    return this->params_.crash_coeff;
+    return latchedCrashCost(crash);
   }
 
   const float state_cost = computeStateCost(y, timestep, crash);
@@ -459,7 +452,7 @@ __device__ float FirstOrderDubinsBicycleCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_
   {
     if (isCrashLatched(crash))
     {
-      return this->params_.crash_coeff;
+      return latchedCrashCost(crash);
     }
 
     const float state_cost = computeStateCost(y, timestep, theta_c, crash);

@@ -15,7 +15,7 @@ struct FirstOrderDubinsBicycleCostParams : public CostParams<2>
   float desired_speed = 2.5F;
   float speed_coeff = 3000.0F;
   float track_coeff = 500.0F;
-  /** Added every rollout step after crash_status is latched (off-road or parked-car hit). */
+  /** Per-violation crash penalty; latched crash_status counts violations (1=off-road or hit, 2=both). */
   float crash_coeff = 100000.0F;
   float boundary_threshold = 0.8F;
   /** Off-road if signed lateral offset exceeds these (path-left = +); <0 falls back to boundary_threshold. */
