@@ -352,7 +352,7 @@ float FirstOrderDubinsBicycleCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PARA
   const float track_cost = this->params_.track_coeff * track_val;
   const float crash_cost = isCrashLatched(crash_status) || detectAndLatchCrash(x_pos, y_pos, yaw, timestep, crash_status) ? latchedCrashCost(crash_status) : 0.0F;
 
-  return speed_cost + track_cost;
+  return speed_cost + track_cost + crash_cost;
 }
 
 template <class CLASS_T, int NUM_TIMESTEPS, class PARAMS_T, class DYN_PARAMS_T>
