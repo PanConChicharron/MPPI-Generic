@@ -235,7 +235,7 @@ inline std::vector<MovingCarObstacle> twoLaneDoubleParkAndRearApproach()
 
   MovingCarObstacle rear_right_lane;
   rear_right_lane.x0 = TwoLaneRoadLayout::kRightLaneX-0.5F;
-  rear_right_lane.y0 = -13.0F;
+  rear_right_lane.y0 = -12.5F;
   rear_right_lane.vx = 0.0F;
   rear_right_lane.vy = 3.5F;
   rear_right_lane.yaw = TwoLaneRoadLayout::kRoadYaw;
