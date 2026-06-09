@@ -66,6 +66,7 @@ void FirstOrderDubinsBicycleCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PARAM
 
   HANDLE_ERROR(cudaMemcpyAsync(this->cost_d_->ref_x_, ref_x_, sizeof(ref_x_), cudaMemcpyHostToDevice, this->stream_));
   HANDLE_ERROR(cudaMemcpyAsync(this->cost_d_->ref_y_, ref_y_, sizeof(ref_y_), cudaMemcpyHostToDevice, this->stream_));
+  HANDLE_ERROR(cudaMemcpyAsync(this->cost_d_->ref_v_, ref_v_, sizeof(ref_v_), cudaMemcpyHostToDevice, this->stream_));
   HANDLE_ERROR(cudaMemcpyAsync(&this->cost_d_->num_obstacles_, &num_obstacles_, sizeof(num_obstacles_),
                                cudaMemcpyHostToDevice, this->stream_));
   HANDLE_ERROR(cudaMemcpyAsync(this->cost_d_->obs_x_, obs_x_, sizeof(obs_x_), cudaMemcpyHostToDevice, this->stream_));
@@ -79,13 +80,14 @@ void FirstOrderDubinsBicycleCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PARAM
 
 template <class CLASS_T, int NUM_TIMESTEPS, class PARAMS_T, class DYN_PARAMS_T>
 void FirstOrderDubinsBicycleCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PARAMS_T>::setReferenceTrajectory(
-    const float* x, const float* y, const int count)
+    const float* x, const float* y, const float* v, const int count)
 {
   const int n = std::max(0, std::min(count, NUM_TIMESTEPS));
   for (int i = 0; i < n; ++i)
   {
     ref_x_[i] = x[i];
     ref_y_[i] = y[i];
+    ref_v_[i] = v != nullptr ? v[i] : this->params_.desired_speed;
   }
   if (n > 0)
   {
@@ -93,6 +95,7 @@ void FirstOrderDubinsBicycleCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PARAM
     {
       ref_x_[i] = x[n - 1];
       ref_y_[i] = y[n - 1];
+      ref_v_[i] = v != nullptr ? v[n - 1] : this->params_.desired_speed;
     }
   }
   dataToDevice();
@@ -329,7 +332,7 @@ __device__ float FirstOrderDubinsBicycleCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_
   const float vel = y[static_cast<int>(O::TOTAL_VELOCITY)];
 
   const float track_val = computeTrackValue(x_pos, y_pos);
-  const float vel_diff = vel - this->params_.desired_speed;
+  const float vel_diff = vel - ref_v_[timestep];
   const float speed_cost = this->params_.speed_coeff * (vel_diff * vel_diff);
   const float track_cost = this->params_.track_coeff * track_val;
   const float crash_cost = isCrashLatched(crash_status) || detectAndLatchCrash(x_pos, y_pos, yaw, timestep, crash_status) ? latchedCrashCost(crash_status) : 0.0F;
@@ -347,7 +350,7 @@ float FirstOrderDubinsBicycleCostImpl<CLASS_T, NUM_TIMESTEPS, PARAMS_T, DYN_PARA
   const float vel = y[static_cast<int>(O::TOTAL_VELOCITY)];
 
   const float track_val = computeTrackValue(x_pos, y_pos);
-  const float vel_diff = vel - this->params_.desired_speed;
+  const float vel_diff = vel - ref_v_[timestep];
   const float speed_cost = this->params_.speed_coeff * (vel_diff * vel_diff);
   const float track_cost = this->params_.track_coeff * track_val;
   const float crash_cost = isCrashLatched(crash_status) || detectAndLatchCrash(x_pos, y_pos, yaw, timestep, crash_status) ? latchedCrashCost(crash_status) : 0.0F;

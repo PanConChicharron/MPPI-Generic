@@ -77,15 +77,17 @@ inline void fillFirstOrderDubinsBicycleCostFromPathReference(
 {
   float ref_x[NUM_TIMESTEPS];
   float ref_y[NUM_TIMESTEPS];
+  float ref_v[NUM_TIMESTEPS];
 
   for (int t = 0; t < NUM_TIMESTEPS; ++t)
   {
     const size_t idx = ref.empty() ? 0U : static_cast<size_t>(std::min(t, static_cast<int>(ref.size()) - 1));
     ref_x[t] = ref[idx].x;
     ref_y[t] = ref[idx].y;
+    ref_v[t] = ref[idx].v;
   }
 
-  cost.setReferenceTrajectory(ref_x, ref_y, NUM_TIMESTEPS);
+  cost.setReferenceTrajectory(ref_x, ref_y, ref_v, NUM_TIMESTEPS);
 }
 
 }  // namespace cost

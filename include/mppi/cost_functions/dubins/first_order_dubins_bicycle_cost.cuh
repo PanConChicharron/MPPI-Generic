@@ -14,7 +14,7 @@ struct FirstOrderDubinsBicycleCostParams : public CostParams<2>
 {
   float desired_speed = 2.5F;
   float speed_coeff = 3000.0F;
-  float track_coeff = 500.0F;
+  float track_coeff = 1000.0F;
   /** Per-violation crash penalty; latched crash_status counts violations (1=off-road or hit, 2=both). */
   float crash_coeff = 100000.0F;
   float boundary_threshold = 0.8F;
@@ -53,7 +53,7 @@ public:
 
   void paramsToDevice();
 
-  void setReferenceTrajectory(const float* x, const float* y, int count);
+  void setReferenceTrajectory(const float* x, const float* y, const float* v, int count);
 
   /** Static obstacles: same pose replicated at every MPPI horizon step. */
   void setOrientedBoxObstacles(const float* x, const float* y, const float* yaw, const float* half_length,
@@ -103,6 +103,7 @@ public:
 
   float ref_x_[NUM_TIMESTEPS] = {};
   float ref_y_[NUM_TIMESTEPS] = {};
+  float ref_v_[NUM_TIMESTEPS] = {};
   int num_obstacles_ = 0;
   float obs_x_[kMaxObstacles][NUM_TIMESTEPS] = {};
   float obs_y_[kMaxObstacles][NUM_TIMESTEPS] = {};

@@ -1,10 +1,12 @@
 /**
- * Generate a time-stamped reference trajectory along a Path2D for MPPI tracking.
- * Samples are spaced by dt (default 0.1 s) in time; arc length advances by v_ref(s) * dt.
+ * Time-stamped reference along a Path2D for MPPI tracking (samples every dt).
  *
- * The arc-length-only `generate(path, start_s, count)` produces a pure path-following reference.
- * The pose-aware overload projects (x, y) to the closest path point and samples forward from there
- * (no merge from the vehicle pose).
+ * Reference construction:
+ * 1. Start at the closest point on the path centerline (orthogonal projection of x, y).
+ * 2. March forward in arc length: s_{k+1} = s_k + v_ref(s_k) * dt, where v_ref is the path
+ *    reference speed (target speed, curvature-limited, end-of-path slowed).
+ *
+ * Vehicle speed is not used to seed or advance the reference.
  */
 #pragma once
 
@@ -73,21 +75,38 @@ public:
     a_lat_max_ = a_lat_max;
   }
 
-  /** Curvature-limited cruise speed at arc length s, capped by target_speed_. */
-  float speedAt(const Path2D& path, const float s) const
+  /** Reference speed at arc length s (target speed, curvature-limited, end-of-path slowed). */
+  float referenceSpeedAt(const Path2D& path, const float s) const
   {
     const float kappa = std::fabs(path.curvatureAt(s));
     const float kappa_eps = 1.0E-4F;
-    if (kappa < kappa_eps)
+    float v_ref = target_speed_;
+    if (kappa >= kappa_eps)
     {
-      return target_speed_;
+      v_ref = std::min(target_speed_, std::sqrt(a_lat_max_ / kappa));
     }
-    return std::min(target_speed_, std::sqrt(a_lat_max_ / kappa));
+    if (!path.closed())
+    {
+      const float dist_to_end = path.length() - s;
+      if (dist_to_end < 5.0F)
+      {
+        v_ref = std::min(v_ref, target_speed_ * std::max(0.0F, dist_to_end / 5.0F));
+      }
+      if (dist_to_end <= 0.0F)
+      {
+        v_ref = 0.0F;
+      }
+    }
+    return std::min(v_ref, v_max_);
+  }
+
+  float speedAt(const Path2D& path, const float s) const
+  {
+    return referenceSpeedAt(path, s);
   }
 
   /**
-   * Build reference samples at t = 0, dt, 2*dt, ... (count-1)*dt along the path forward from start_s.
-   * @param count  Number of samples (e.g. MPPI horizon + 1)
+   * Reference from arc length s0: sample at t = 0, dt, ... marching with v_ref(s) * dt.
    */
   std::vector<PathReferenceSample> generate(const Path2D& path, const float start_s, const int count) const
   {
@@ -107,23 +126,10 @@ public:
       r.x = p.x;
       r.y = p.y;
       r.yaw = p.yaw;
-      r.v = speedAt(path, s);
-      if (!path.closed())
-      {
-        const float dist_to_end = path.length() - s;
-        if (dist_to_end < 5.0F)
-        {
-          r.v = std::min(r.v, target_speed_ * std::max(0.0F, dist_to_end / 5.0F));
-        }
-        if (dist_to_end <= 0.0F)
-        {
-          r.v = 0.0F;
-        }
-      }
+      r.v = referenceSpeedAt(path, s);
       if (k + 1 < count)
       {
-        const float v_mid = r.v;
-        const float s_next = s + v_mid * dt_;
+        const float s_next = s + r.v * dt_;
         if (path.closed())
         {
           s = path.wrapArcLength(s_next);
@@ -138,21 +144,27 @@ public:
   }
 
   /**
-   * Pose-aware reference: project (x, y) onto the path, then sample the path forward from the
-   * footpoint. yaw and v are unused (kept for call-site compatibility).
+   * Project (x, y) to the closest centerline point, then march forward at reference speed.
+   * @param s_hint  Optional arc-length hint for projection search (e.g. last step's s).
    */
+  std::vector<PathReferenceSample> generate(const Path2D& path, const int count, const float x, const float y,
+                                            const float s_hint = 0.0F) const
+  {
+    if (count <= 0 || path.empty())
+    {
+      return {};
+    }
+    const PathProjection proj = projectPoseOntoPath(path, x, y, path.wrapArcLength(s_hint));
+    return generate(path, proj.arc_length_s, count);
+  }
+
+  /** @deprecated Use generate(path, count, x, y, s_hint); yaw and v are ignored. */
   std::vector<PathReferenceSample> generate(const Path2D& path, const float start_s, const int count, const float x,
                                           const float y, const float yaw, const float v) const
   {
     (void)yaw;
     (void)v;
-    if (count <= 0 || path.empty())
-    {
-      return {};
-    }
-    const float s_hint = path.wrapArcLength(start_s);
-    const PathProjection proj = projectPoseOntoPath(path, x, y, s_hint);
-    return generate(path, proj.arc_length_s, count);
+    return generate(path, count, x, y, start_s);
   }
 
 private:

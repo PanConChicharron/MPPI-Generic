@@ -206,10 +206,8 @@ int main(int argc, char** argv)
     const float sim_time = static_cast<float>(k) * kDt;
 
     const std::vector<mppi::path::PathReferenceSample> ref = ref_gen.generate(
-        path, arcLength, kRefHorizon, x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::POS_X)),
-        x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::POS_Y)),
-        x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::YAW)),
-        x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::VEL_X)));
+        path, kRefHorizon, x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::POS_X)),
+        x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::POS_Y)), arcLength);
     mppi::cost::fillFirstOrderDubinsBicycleCostFromPathReference<kRefHorizon>(cost, ref);
 
     mppi::cost::buildObstacleTrajectoryBuffers(obstacles, sim_time, kDt, kRefHorizon, obs_traj_x, obs_traj_y,
@@ -304,7 +302,7 @@ int main(int argc, char** argv)
     arcLength = proj.arc_length_s;
 
     const mppi::path::PathReferenceSample& r0 = ref.front();
-    const float ref_v_target = ref_gen.speedAt(path, proj.arc_length_s);
+    const float ref_v_target = r0.v;
     log << t_end << "," << x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::POS_X)) << ","
         << x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::POS_Y)) << ","
         << x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::YAW)) << ","
