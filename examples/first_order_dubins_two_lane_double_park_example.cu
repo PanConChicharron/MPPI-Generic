@@ -38,7 +38,7 @@ namespace
   constexpr int kRefHorizon = kMppiHorizon;
   constexpr float kDt = 0.1F;
   constexpr int kNumRollouts = 32 * 1024;
-  constexpr float kTargetSpeed = 5.0F;
+  constexpr float kTargetSpeed = 3.0F;
   constexpr float kVMax = 5.0F;
   constexpr float kLambda = 1500.0F;
 
