@@ -9,9 +9,9 @@
 #   Legacy RacerDubins examples (if present) — throttle/steer, optional path_u_*, arc_s
 #
 # Usage:
-#   python3 examples/plot_racer_dubins_temporal_mppi.py dubins_path_tracking_log.csv
-#   python3 examples/plot_racer_dubins_temporal_mppi.py log.csv -o viz.png
-#   python3 examples/plot_racer_dubins_temporal_mppi.py log.csv --no-show
+#   python3 scripts/mppi/plot_racer_dubins_temporal_mppi.py dubins_path_tracking_log.csv
+#   python3 scripts/mppi/plot_racer_dubins_temporal_mppi.py log.csv -o viz.png
+#   python3 scripts/mppi/plot_racer_dubins_temporal_mppi.py log.csv --no-show
 
 import argparse
 import csv

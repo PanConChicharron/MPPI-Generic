@@ -3,9 +3,9 @@
  *
  * Build: cmake --build build --target dubins_stadium_path_tracking_example
  * Run:   ./build/examples/dubins_stadium_path_tracking_example [--straight 40] [--radius 10] [log.csv]
- * Plot:  python3 examples/plot_racer_dubins_temporal_mppi.py dubins_stadium_path_tracking_log.csv
+ * Plot:  python3 scripts/mppi/plot_racer_dubins_temporal_mppi.py dubins_stadium_path_tracking_log.csv
  */
- #include "mppi_rollout_csv.hpp"
+ #include <mppi/utils/data_manager.hpp>
 
  #include <mppi/controllers/MPPI/mppi_controller.cuh>
  #include <mppi/cost_functions/path_tracking/path_tracking_cost.cuh>
@@ -60,7 +60,14 @@
    using FB = DDPFeedback<DYN, kMppiHorizon>;
    using SAMPLER = mppi::sampling_distributions::GaussianDistribution<DYN::DYN_PARAMS_T>;
    using Mppi = VanillaMPPIController<DYN, COST, FB, kMppiHorizon, kNumRollouts, SAMPLER>;
- 
+
+   const mppi::data::RolloutOutputIndices kRolloutOutIdx{
+       static_cast<int>(DubinsBicycleParams::OutputIndex::POS_X),
+       static_cast<int>(DubinsBicycleParams::OutputIndex::POS_Y),
+       static_cast<int>(DubinsBicycleParams::OutputIndex::YAW),
+       static_cast<int>(DubinsBicycleParams::OutputIndex::VEL_X),
+   };
+
    int simStepsForLaps(const mppi::path::Path2D& path, const float laps)
    {
      const float lap_time = path.length() / kVMax;
@@ -74,8 +81,13 @@
  
      const mppi::path::Path2D path = mppi::path::Path2D::circle(kCircleCenterX, kCircleCenterY, kCircleRadius, kCircleTheta0, kCirclePlotSamples);
      const int kSimSteps = simStepsForLaps(path, kSimLaps);
-     mppi::rollout_csv::writeCenterlineForLog(path, log_path);
- 
+
+     mppi::data::MppiDataManager<DYN> data_mgr;
+     if (!data_mgr.beginRun(log_path, path, mppi::data::PathTrackingLogSchema::kRefV))
+     {
+       return 1;
+     }
+
      mppi::path::PathReferenceGenerator ref_gen(kDt);
      ref_gen.setSpeedCap(kVMax);
  
@@ -90,7 +102,7 @@
      COST cost;
      PathTrackingCostParams<kRefHorizon> cost_params;
      // Order: w_pos, w_heading_so2, w_vel, w_lat_accel, w_lat_jerk, w_steer_dot, w_accel, w_steer.
-     // These match the closed-loop dubins_stadium_path_tracking_example defaults.
+     // These match the closed-loop examples/dubins/dubins_stadium_path_tracking_example defaults.
      mppi::path::fillPathTrackingCostWeights<kRefHorizon>(cost_params, 5.0F, 1.0F, 5.0F, 5.0F, 10.0F, 10.0F, 5.0F, 0.5F);
      mppi::path::fillPathTrackingBicycleGeometry<kRefHorizon>(cost_params, dyn);
      cost.setParams(cost_params);
@@ -135,19 +147,12 @@
      x_history.reserve(kSimSteps);
      u_history.reserve(kSimSteps);
      y_history.reserve(kSimSteps);
- 
-    std::ofstream log(log_path.c_str());
-    if (!log) {
-      std::cerr << "Could not open log: " << log_path << "\n";
-      return 1;
-    }
-    log << "t,pos_x,pos_y,yaw,vel_x,steer_angle,brake_state,u_accel,u_steer,nom_u_accel,nom_u_steer,"
-           "ref_x,ref_y,ref_yaw,ref_v,arc_s,lat_err,baseline\n";
-    log << std::scientific;
 
     float arcLength = kInitArcLength;
  
      for (size_t k = 0; k < kSimSteps; ++k) {
+       const float sim_time = static_cast<float>(k) * kDt;
+
        const std::vector<mppi::path::PathReferenceSample> ref = ref_gen.generate(path, arcLength, kRefHorizon);
        mppi::path::fillCostFromPathReference<kRefHorizon>(cost_params, ref, &path, &dyn);
        cost.setParams(cost_params);
@@ -156,8 +161,13 @@
       const DYN::control_array u_nom_step = u_nom.col(0);
 
       controller.computeControl(x, 1);
+      cudaStreamSynchronize(controller.stream_);
+      controller.calculateSampledStateTrajectories();
        
        Mppi::control_trajectory u_opt = controller.getControlSeq();
+
+       data_mgr.dumpRolloutSnapshot(k, sim_time, x, controller, model, sampler, kMppiHorizon, kLambda, kDt, u_opt,
+                                    kRolloutOutIdx);
  
        DYN::state_array x_next = model.getZeroState();
        DYN::state_array xdot = model.getZeroState();
@@ -178,21 +188,28 @@
  
       const mppi::path::PathReferenceSample& r0 = ref.front();
       const float t_end = static_cast<float>(k + 1) * kDt;
-      log << t_end << ","
-          << x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_X)) << ","
-          << x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_Y)) << ","
-          << x(static_cast<int>(DubinsBicycleParams::StateIndex::YAW)) << ","
-          << x(static_cast<int>(DubinsBicycleParams::StateIndex::VEL_X)) << ","
-          << x(static_cast<int>(DubinsBicycleParams::StateIndex::STEER_ANGLE)) << ",0,"
-          << u_opt.col(0)(static_cast<int>(DubinsBicycleParams::ControlIndex::ACCEL)) << ","
-          << u_opt.col(0)(static_cast<int>(DubinsBicycleParams::ControlIndex::STEER)) << ","
-          << u_nom_step(static_cast<int>(DubinsBicycleParams::ControlIndex::ACCEL)) << ","
-          << u_nom_step(static_cast<int>(DubinsBicycleParams::ControlIndex::STEER)) << ","
-          << r0.x << "," << r0.y << "," << r0.yaw << "," << r0.v << ","
-          << proj.arc_length_s << "," << proj.signed_lateral_error << ","
-          << static_cast<float>(controller.getBaselineCost()) << "\n";
+      mppi::data::PathTrackingStepLog step_log{};
+      step_log.t = t_end;
+      step_log.pos_x = x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_X));
+      step_log.pos_y = x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_Y));
+      step_log.yaw = x(static_cast<int>(DubinsBicycleParams::StateIndex::YAW));
+      step_log.vel_x = x(static_cast<int>(DubinsBicycleParams::StateIndex::VEL_X));
+      step_log.steer_angle = x(static_cast<int>(DubinsBicycleParams::StateIndex::STEER_ANGLE));
+      step_log.u_accel = u_opt.col(0)(static_cast<int>(DubinsBicycleParams::ControlIndex::ACCEL));
+      step_log.u_steer = u_opt.col(0)(static_cast<int>(DubinsBicycleParams::ControlIndex::STEER));
+      step_log.nom_u_accel = u_nom_step(static_cast<int>(DubinsBicycleParams::ControlIndex::ACCEL));
+      step_log.nom_u_steer = u_nom_step(static_cast<int>(DubinsBicycleParams::ControlIndex::STEER));
+      step_log.ref_x = r0.x;
+      step_log.ref_y = r0.y;
+      step_log.ref_yaw = r0.yaw;
+      step_log.ref_v = r0.v;
+      step_log.arc_s = proj.arc_length_s;
+      step_log.lat_err = proj.signed_lateral_error;
+      step_log.baseline = static_cast<float>(controller.getBaselineCost());
+      data_mgr.logPathTrackingStep(step_log);
      }
  
-     log.close();
+     data_mgr.close();
+     std::cout << "Wrote " << log_path << " and rollout snapshots under " << data_mgr.rolloutDirectory() << "\n";
      return 0;
    }

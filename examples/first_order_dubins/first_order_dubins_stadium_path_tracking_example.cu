@@ -1,17 +1,16 @@
 /**
- * @file first_order_dubins_two_lane_double_park_example.cu
- * @brief Two-lane straight road: ego in the left lane goes around a stopped vehicle by
- *        nudging into the right lane while avoiding faster traffic there from behind.
+ * @file first_order_dubins_stadium_path_tracking_example.cu
+ * @brief MPPI path tracking on a stadium track with FirstOrderDubinsBicycle and matching analytic cost.
  *
- * Build: cmake --build build --target first_order_dubins_two_lane_double_park_example
- * Run:   ./build/examples/first_order_dubins_two_lane_double_park_example [seed] [log.csv]
+ * Build: cmake --build build --target first_order_dubins_stadium_path_tracking_example
+ * Run:   ./build/examples/first_order_dubins_stadium_path_tracking_example [seed] [log.csv]
+ * Plot:  python3 scripts/mppi/plot_racer_dubins_temporal_mppi.py first_order_dubins_stadium_path_tracking_log.csv
  */
 
-#include "mppi_rollout_csv.hpp"
+#include <mppi/utils/data_manager.hpp>
 
 #include <mppi/cost_functions/dubins/first_order_dubins_bicycle_cost.cuh>
 #include <mppi/cost_functions/dubins/first_order_dubins_bicycle_cost_bridge.hpp>
-#include <mppi/cost_functions/moving_car_obstacles.hpp>
 #include <mppi/controllers/MPPI/mppi_controller.cuh>
 #include <mppi/dynamics/dubins/first_order_dubins_bicycle.cuh>
 #include <mppi/feedback_controllers/zero_feedback.cuh>
@@ -20,8 +19,8 @@
 #include <mppi/path/path2d.hpp>
 #include <mppi/sampling_distributions/gaussian/gaussian.cuh>
 
-#include "path_tracking_viz.hpp"
-#include "step_timing.hpp"
+#include <mppi/viz/path_tracking_viz.hpp>
+#include <mppi/utils/step_timing.hpp>
 
 #include <opencv2/opencv.hpp>
 
@@ -29,28 +28,25 @@
 #include <cmath>
 #include <fstream>
 #include <iomanip>
+#include <random>
 #include <string>
-#include <vector>
 
 namespace
 {
-  constexpr int kMppiHorizon = 80;
+  constexpr int kMppiHorizon = 50;
   constexpr int kRefHorizon = kMppiHorizon;
   constexpr float kDt = 0.1F;
   constexpr int kNumRollouts = 32 * 1024;
   constexpr float kTargetSpeed = 3.0F;
   constexpr float kVMax = 5.0F;
-  constexpr float kLambda = 1500.0F;
+  constexpr size_t kSimLaps = 5;
 
-  constexpr float kLeftLaneX = mppi::cost::TwoLaneRoadLayout::kLeftLaneX;
-  constexpr float kRightLaneX = mppi::cost::TwoLaneRoadLayout::kRightLaneX;
-  constexpr float kLaneHalfWidth = mppi::cost::TwoLaneRoadLayout::kLaneHalfWidth;
-  /** Stay inside left lane to the curb; allow encroachment into the adjacent right lane only. */
-  constexpr float kBoundaryLeft = kLaneHalfWidth;
-  constexpr float kBoundaryRight = (kRightLaneX - kLeftLaneX) + kLaneHalfWidth * 0.4F;
-  constexpr float kRoadYStart = mppi::cost::TwoLaneRoadLayout::kRoadYStart;
-  constexpr float kRoadYEnd = mppi::cost::TwoLaneRoadLayout::kRoadYEnd;
-  constexpr float kInitArcLength = 1.5F;
+  constexpr float kStraightLength = 40.0F;
+  constexpr float kTurnRadius = 10.0F;
+  constexpr int kSamplesPerArc = 48;
+
+  constexpr float kInitArcLength = kStraightLength - 2.0F;
+  constexpr float kLambda = 1500.0F;
 
   using DYN = FirstOrderDubinsBicycle;
   using COST = FirstOrderDubinsBicycleCost<kRefHorizon>;
@@ -58,15 +54,17 @@ namespace
   using SAMPLER = mppi::sampling_distributions::GaussianDistribution<DYN::DYN_PARAMS_T>;
   using Mppi = VanillaMPPIController<DYN, COST, FB, kMppiHorizon, kNumRollouts, SAMPLER>;
 
-  mppi::path::Path2D makeLeftLanePath()
-  {
-    return mppi::path::Path2D::straightLine(kLeftLaneX, kRoadYStart, kLeftLaneX, kRoadYEnd, 36);
-  }
+  const mppi::data::RolloutOutputIndices kRolloutOutIdx{
+      static_cast<int>(FirstOrderDubinsBicycleParams::OutputIndex::BASELINK_POS_I_X),
+      static_cast<int>(FirstOrderDubinsBicycleParams::OutputIndex::BASELINK_POS_I_Y),
+      static_cast<int>(FirstOrderDubinsBicycleParams::OutputIndex::YAW),
+      static_cast<int>(FirstOrderDubinsBicycleParams::OutputIndex::BASELINK_VEL_B_X),
+  };
 
-  int simulationSteps(const mppi::path::Path2D& path)
+  int simStepsForLaps(const mppi::path::Path2D& path, const float laps)
   {
-    const float duration = path.length() / kTargetSpeed + 6.0F;
-    return static_cast<int>(std::ceil(duration / kDt));
+    const float lap_time = path.length() / kVMax;
+    return static_cast<int>(std::ceil(laps * lap_time / kDt));
   }
 }  // namespace
 
@@ -77,28 +75,32 @@ int main(int argc, char** argv)
   {
     seed = std::stoul(argv[1]);
   }
-  (void)seed;
   std::cout << "Using random seed: " << seed << std::endl;
-
-  const std::string video_path = "first_order_dubins_two_lane_double_park.mp4";
-  std::string log_path = "first_order_dubins_two_lane_double_park_log.csv";
+  const std::string video_path = "first_order_dubins_stadium_path_tracking.mp4";
+  std::string log_path = "first_order_dubins_stadium_path_tracking_log.csv";
   if (argc > 2)
   {
     log_path = argv[2];
   }
 
-  const mppi::path::Path2D path = makeLeftLanePath();
-  mppi::rollout_csv::writeCenterlineForLog(path, log_path);
+  const mppi::path::Path2D path = mppi::path::Path2D::stadium(kStraightLength, kTurnRadius, kSamplesPerArc);
 
-  std::vector<mppi::cost::MovingCarObstacle> obstacles = mppi::cost::twoLaneDoubleParkAndRearApproach();
-  std::cout << "Ego left lane x=" << kLeftLaneX << ", stopped @ (" << obstacles[0].x0 << ", " << obstacles[0].y0
-            << "), right-lane traffic @ x=" << obstacles[1].x0 << " y=" << obstacles[1].y0
-            << " vy=" << obstacles[1].vy << " m/s\n";
+  mppi::data::MppiDataManager<DYN> data_mgr;
+  if (!data_mgr.beginRun(log_path, path))
+  {
+    return 1;
+  }
+
+  constexpr float kRoadHalfWidth = 0.8F;
+  const std::vector<mppi::cost::ParkedCarObstacle> parked_cars =
+      mppi::cost::generateParkedCarsAlongRoad(path, kRoadHalfWidth, seed);
+  std::cout << "Parked cars along track: " << parked_cars.size() << "\n";
 
   mppi::path::PathReferenceGenerator ref_gen(kDt);
   ref_gen.setSpeedCap(kVMax);
   ref_gen.setTargetSpeed(kTargetSpeed);
-  const int num_sim_steps = simulationSteps(path);
+
+  const size_t num_sim_steps = simStepsForLaps(path, kSimLaps);
   float arcLength = kInitArcLength;
 
   DYN model;
@@ -110,15 +112,14 @@ int main(int argc, char** argv)
 
   FirstOrderDubinsBicycleCostParams<kRefHorizon> cost_params;
   cost_params.desired_speed = kTargetSpeed;
-  cost_params.boundary_threshold = kLaneHalfWidth;
-  cost_params.boundary_threshold_left = kBoundaryLeft;
-  cost_params.boundary_threshold_right = kBoundaryRight;
+  cost_params.boundary_threshold = kRoadHalfWidth;
   mppi::cost::fillFirstOrderDubinsBicycleCostGeometry<kRefHorizon>(cost_params, dyn);
   constexpr float kEgoLength = 0.55F * 1.5F;
   constexpr float kEgoWidth = 0.28F * 1.5F;
   mppi::cost::setFirstOrderDubinsBicycleCostEgoFootprint<kRefHorizon>(cost_params, dyn.wheel_base, kEgoLength,
                                                                     kEgoWidth);
   cost.setParams(cost_params);
+  mppi::cost::fillFirstOrderDubinsBicycleCostParkedCars<kRefHorizon>(cost, parked_cars);
 
   const float kMaxSteer = dyn.max_steer_angle;
   std::array<float2, DYN::CONTROL_DIM> u_rng{};
@@ -129,7 +130,7 @@ int main(int argc, char** argv)
 
   SAMPLER::SAMPLING_PARAMS_T sp{};
   sp.std_dev[static_cast<int>(FirstOrderDubinsBicycleParams::ControlIndex::ACCELERATION_CMD)] = 0.35F;
-  sp.std_dev[static_cast<int>(FirstOrderDubinsBicycleParams::ControlIndex::STEER_CMD)] = 0.06F;
+  sp.std_dev[static_cast<int>(FirstOrderDubinsBicycleParams::ControlIndex::STEER_CMD)] = 0.03F;
   sp.sum_strides = std::max(32, (kNumRollouts + 1023) / 1024);
   SAMPLER sampler(sp);
 
@@ -154,17 +155,17 @@ int main(int argc, char** argv)
   x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::YAW)) = p0.yaw;
   x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::VEL_X)) = kTargetSpeed;
 
-  std::vector<float> obs_traj_x;
-  std::vector<float> obs_traj_y;
-  std::vector<float> obs_traj_yaw;
-  std::vector<float> obs_half_length;
-  std::vector<float> obs_half_width;
+  const std::vector<mppi::path::PathReferenceSample> ref_init = ref_gen.generate(
+      path, arcLength, kRefHorizon, x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::POS_X)),
+      x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::POS_Y)),
+      x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::YAW)),
+      x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::VEL_X)));
+  mppi::cost::fillFirstOrderDubinsBicycleCostFromPathReference<kRefHorizon>(cost, ref_init);
 
   cv::Mat base_frame = mppi::viz::makeWhiteFrame(1024, 1024);
-  mppi::viz::drawStraightCorridor(base_frame, kLeftLaneX, kRoadYStart, kLeftLaneX, kRoadYEnd, kLaneHalfWidth);
-  mppi::viz::drawStraightCorridor(base_frame, kRightLaneX, kRoadYStart, kRightLaneX, kRoadYEnd, kLaneHalfWidth);
-  mppi::viz::drawRoadBoundaries(base_frame, path, kLaneHalfWidth);
+  mppi::viz::drawRoadBoundaries(base_frame, path, kRoadHalfWidth);
   mppi::viz::drawCenterline(base_frame, path);
+  mppi::viz::drawParkedCars(base_frame, parked_cars);
 
   const mppi::viz::TimeSeriesPlotLayout& plot_layout = mppi::viz::defaultTimeSeriesPlotLayout();
   const cv::Size composite_size =
@@ -172,54 +173,36 @@ int main(int argc, char** argv)
   cv::VideoWriter video(video_path, cv::VideoWriter::fourcc('m', 'p', '4', 'v'), static_cast<int>(1.0F / kDt),
                         composite_size);
 
-  cv::namedWindow("MPPI Two-Lane Double Park", cv::WINDOW_NORMAL);
+  cv::namedWindow("MPPI Tracking", cv::WINDOW_NORMAL);
 
   mppi::viz::RunningTimeSeries signal_history;
 
-  std::ofstream log(log_path.c_str());
-  if (!log)
-  {
-    std::cerr << "Could not open log: " << log_path << "\n";
-    return 1;
-  }
-  log << "t,pos_x,pos_y,yaw,vel_x,steer_angle,brake_state,u_accel,u_steer,nom_u_accel,nom_u_steer,"
-         "ref_x,ref_y,ref_yaw,ref_v_pose,ref_v_target,arc_s,lat_err,baseline\n";
-  log << std::scientific;
-
   mppi::timing::StepTimingCollector step_timing;
-  step_timing.reserve(static_cast<size_t>(num_sim_steps));
+  step_timing.reserve(num_sim_steps);
 
   const int state_x_idx = static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::POS_X);
   const int state_y_idx = static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::POS_Y);
   const int output_x_idx = static_cast<int>(FirstOrderDubinsBicycleParams::OutputIndex::BASELINK_POS_I_X);
   const int output_y_idx = static_cast<int>(FirstOrderDubinsBicycleParams::OutputIndex::BASELINK_POS_I_Y);
 
-  const cv::Scalar kParkedFill(70, 70, 70);
-  const cv::Scalar kParkedOutline(30, 30, 30);
-  const cv::Scalar kTrafficFill(40, 80, 200);
-  const cv::Scalar kTrafficOutline(20, 40, 120);
-
-  for (int k = 0; k < num_sim_steps; ++k)
+  for (size_t k = 0; k < num_sim_steps; ++k)
   {
     step_timing.beginStep();
 
     const float sim_time = static_cast<float>(k) * kDt;
 
     const std::vector<mppi::path::PathReferenceSample> ref = ref_gen.generate(
-        path, kRefHorizon, x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::POS_X)),
-        x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::POS_Y)), arcLength);
+        path, arcLength, kRefHorizon, x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::POS_X)),
+        x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::POS_Y)),
+        x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::YAW)),
+        x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::VEL_X)));
     mppi::cost::fillFirstOrderDubinsBicycleCostFromPathReference<kRefHorizon>(cost, ref);
-
-    mppi::cost::buildObstacleTrajectoryBuffers(obstacles, sim_time, kDt, kRefHorizon, obs_traj_x, obs_traj_y,
-                                               obs_traj_yaw, obs_half_length, obs_half_width);
-    mppi::cost::fillFirstOrderDubinsBicycleCostObstacleTrajectories<kRefHorizon>(
-        cost, obs_traj_x.data(), obs_traj_y.data(), obs_traj_yaw.data(), obs_half_length.data(), obs_half_width.data(),
-        static_cast<int>(obstacles.size()), kRefHorizon);
 
     if (k > 0)
     {
       u_nom.leftCols(kMppiHorizon - 1) = u_opt.rightCols(kMppiHorizon - 1);
       u_nom.rightCols(1) = u_opt.rightCols(1);
+      // biasNominalAcceleration(u_nom, x, dyn, kTargetSpeed);
     }
 
     controller.updateImportanceSampler(u_nom);
@@ -232,7 +215,11 @@ int main(int argc, char** argv)
     step_timing.endMppi();
 
     const Mppi::control_trajectory u_opt_traj = controller.getControlSeq();
+
     u_opt = u_opt_traj;
+
+    data_mgr.dumpRolloutSnapshot(k, sim_time, x, controller, model, sampler, kMppiHorizon, kLambda, kDt, u_opt_traj,
+                                 kRolloutOutIdx);
 
     const auto state_trajectory = controller.getActualStateSeq();
     const auto sampled_trajectories = controller.getSampledOutputTrajectories();
@@ -244,24 +231,12 @@ int main(int argc, char** argv)
       rollout_costs[i] = sampled_cost_trajs[i].sum();
     }
 
-    const std::vector<mppi::cost::ParkedCarObstacle> obs_viz =
-        mppi::cost::movingCarPosesAt(obstacles, sim_time);
-
     auto frame = base_frame.clone();
+
     mppi::viz::drawReferencePath(frame, ref);
     mppi::viz::drawSampledTrajectories(frame, sampled_trajectories, output_x_idx, output_y_idx, kMppiHorizon,
                                        rollout_costs);
     mppi::viz::drawTrajectory(frame, state_trajectory, state_x_idx, state_y_idx);
-    if (!obs_viz.empty())
-    {
-      const std::vector<mppi::cost::ParkedCarObstacle> parked_only(1, obs_viz[0]);
-      mppi::viz::drawParkedCars(frame, parked_only, kParkedFill, kParkedOutline);
-    }
-    if (obs_viz.size() > 1)
-    {
-      const std::vector<mppi::cost::ParkedCarObstacle> traffic_only(1, obs_viz[1]);
-      mppi::viz::drawParkedCars(frame, traffic_only, kTrafficFill, kTrafficOutline);
-    }
     mppi::viz::drawEgoVehicleAtRearAxle(frame, x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::POS_X)),
                                         x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::POS_Y)),
                                         x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::YAW)), kEgoLength,
@@ -293,7 +268,7 @@ int main(int argc, char** argv)
     const cv::Mat composite = mppi::viz::composeFrameWithTimeSeriesPlots(
         frame, signal_history, kTargetSpeed, kVMax, dyn.min_accel, dyn.max_accel, kMaxSteer, plot_layout);
     video.write(composite);
-    mppi::viz::showCompositeFrame("MPPI Two-Lane Double Park", composite, plot_layout);
+    mppi::viz::showCompositeFrame("MPPI Tracking", composite, plot_layout);
     step_timing.endViz();
 
     const mppi::path::PathProjection proj = mppi::path::projectPoseOntoPath(
@@ -302,24 +277,35 @@ int main(int argc, char** argv)
     arcLength = proj.arc_length_s;
 
     const mppi::path::PathReferenceSample& r0 = ref.front();
-    const float ref_v_target = r0.v;
-    log << t_end << "," << x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::POS_X)) << ","
-        << x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::POS_Y)) << ","
-        << x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::YAW)) << ","
-        << vel_x << ","
-        << steer_state << ",0," << accel_cmd << ","
-        << steer_cmd << ","
-        << u_nom_step(static_cast<int>(FirstOrderDubinsBicycleParams::ControlIndex::ACCELERATION_CMD)) << ","
-        << u_nom_step(static_cast<int>(FirstOrderDubinsBicycleParams::ControlIndex::STEER_CMD)) << "," << r0.x << ","
-        << r0.y << "," << r0.yaw << "," << r0.v << "," << ref_v_target << "," << proj.arc_length_s << ","
-        << proj.signed_lateral_error << "," << static_cast<float>(controller.getBaselineCost()) << "\n";
+    const float ref_v_target = ref_gen.speedAt(path, proj.arc_length_s);
+    mppi::data::PathTrackingStepLog step_log{};
+    step_log.t = t_end;
+    step_log.pos_x = x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::POS_X));
+    step_log.pos_y = x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::POS_Y));
+    step_log.yaw = x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::YAW));
+    step_log.vel_x = vel_x;
+    step_log.steer_angle = steer_state;
+    step_log.u_accel = accel_cmd;
+    step_log.u_steer = steer_cmd;
+    step_log.nom_u_accel = u_nom_step(static_cast<int>(FirstOrderDubinsBicycleParams::ControlIndex::ACCELERATION_CMD));
+    step_log.nom_u_steer = u_nom_step(static_cast<int>(FirstOrderDubinsBicycleParams::ControlIndex::STEER_CMD));
+    step_log.ref_x = r0.x;
+    step_log.ref_y = r0.y;
+    step_log.ref_yaw = r0.yaw;
+    step_log.ref_v_pose = r0.v;
+    step_log.ref_v_target = ref_v_target;
+    step_log.arc_s = proj.arc_length_s;
+    step_log.lat_err = proj.signed_lateral_error;
+    step_log.baseline = static_cast<float>(controller.getBaselineCost());
+    data_mgr.logPathTrackingStep(step_log);
 
     step_timing.endStep();
   }
 
-  log.close();
+  data_mgr.close();
   step_timing.printReport();
   cost.freeCudaMem();
-  std::cout << "Wrote " << video_path << " and " << log_path << "\n";
+  std::cout << "Wrote " << video_path << ", " << log_path << ", and rollout snapshots under "
+            << data_mgr.rolloutDirectory() << "\n";
   return 0;
 }

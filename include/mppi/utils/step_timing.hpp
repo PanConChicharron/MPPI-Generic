@@ -1,5 +1,5 @@
 /**
- * Steady-clock timing helpers for example simulation loops (min / max / mean / mode).
+ * Steady-clock timing helpers for simulation loops (min / max / mean / mode).
  */
 #pragma once
 

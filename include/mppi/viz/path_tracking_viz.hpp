@@ -1,5 +1,5 @@
 /**
- * OpenCV visualization helpers for 2D path-tracking examples.
+ * OpenCV visualization helpers for 2D path-tracking simulations.
  */
 #pragma once
 

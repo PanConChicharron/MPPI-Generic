@@ -3,7 +3,7 @@
  *
  * Build: cmake --build build --target dubins_stadium_mppi_rollout_analysis_example
  * Run:   ./build/examples/dubins_stadium_mppi_rollout_analysis_example [output_prefix]
- * Plot:  python3 examples/plot_mppi_rollout_analysis.py dubins_stadium_mppi_rollout_analysis
+ * Plot:  python3 scripts/mppi/plot_mppi_rollout_analysis.py dubins_stadium_mppi_rollout_analysis
  *
  * Same single-iteration structure as dubins_circle_mppi_rollout_analysis_example, but on a
  * stadium track. The vehicle is placed 2 m before the right-turn corner entry (s = straight_length
@@ -21,7 +21,7 @@
  * We do still pull noise samples and host-replay the dynamics for each rollout, only because
  * output_d_ is not reliably accessible from the host in this codebase and we need (x, y) for plot.
  */
-#include "mppi_rollout_csv.hpp"
+#include <mppi/utils/data_manager.hpp>
 
 #include <mppi/controllers/MPPI/mppi_controller.cuh>
 #include <mppi/cost_functions/path_tracking/path_tracking_cost.cuh>
@@ -87,7 +87,14 @@ int main(int argc, char** argv)
   }
 
   const mppi::path::Path2D path = mppi::path::Path2D::stadium(kStraightLength, kTurnRadius, kSamplesPerArc);
-  mppi::rollout_csv::writeCenterline(path, prefix);
+
+  mppi::data::MppiDataManager<DYN> data_mgr;
+  data_mgr.beginAnalysisRun(prefix, path);
+  const mppi::data::RolloutOutputIndices kRolloutOutIdx(
+      static_cast<int>(DubinsBicycleParams::OutputIndex::POS_X),
+      static_cast<int>(DubinsBicycleParams::OutputIndex::POS_Y),
+      static_cast<int>(DubinsBicycleParams::OutputIndex::YAW),
+      static_cast<int>(DubinsBicycleParams::OutputIndex::VEL_X));
 
   mppi::path::PathReferenceGenerator ref_gen(kDt);
   ref_gen.setSpeedCap(kVMax);
@@ -103,7 +110,7 @@ int main(int argc, char** argv)
   COST cost;
   PathTrackingCostParams<kRefHorizon> cost_params;
   // Order: w_pos, w_heading_so2, w_vel, w_lat_accel, w_lat_jerk, w_steer_dot, w_accel, w_steer.
-  // These match the closed-loop dubins_stadium_path_tracking_example defaults.
+  // These match the closed-loop examples/dubins/dubins_stadium_path_tracking_example defaults.
   mppi::path::fillPathTrackingCostWeights<kRefHorizon>(cost_params, 2.0F, 1.0F, 5.0F, 5.0F, 20.0F, 50.0F, 5.0F, 0.5F);
   mppi::path::fillPathTrackingBicycleGeometry<kRefHorizon>(cost_params, dyn);
   cost.setParams(cost_params);
@@ -129,7 +136,7 @@ int main(int argc, char** argv)
   // PathTrackingCost has a large device params blob; the combined rollout kernel mis-aligns
   // shared memory (illegal memory access). Use split kernels for the optimization itself.
   controller.setKernelChoice(kernelType::USE_SPLIT_KERNELS);
-  model.GPUSetup();12
+  model.GPUSetup();
   cost.GPUSetup();
 
   DYN::state_array x = model.getZeroState();
@@ -154,7 +161,7 @@ int main(int argc, char** argv)
   // absent on purpose: this file exists to dump a single MPPI optimization
   // for plotting/diagnostics, not to drive the vehicle along the path. The
   // closed-loop equivalent lives in
-  // examples/dubins_stadium_path_tracking_example.cu.
+  // closed-loop equivalent lives in examples/dubins/dubins_stadium_path_tracking_example.cu.
   // ===========================================================================
 
   // (1) Reference from current state.
@@ -181,7 +188,7 @@ int main(int argc, char** argv)
 
   // (3) State update: NOT PRESENT.
   //     A sim-loop iteration would do (matching the for-loop body in
-  //     dubins_stadium_path_tracking_example.cu):
+  //     examples/dubins/dubins_stadium_path_tracking_example.cu):
   //       Mppi::control_trajectory u_opt = controller.getControlSeq();
   //       model.enforceConstraints(x, u_opt.col(0));
   //       model.step(x, x_next, xdot, u_opt.col(0), y, k, kDt);
@@ -205,69 +212,17 @@ int main(int argc, char** argv)
 
   const int num_logged = kNumRollouts;
   std::vector<float> raw_costs(num_logged, 0.0F);
-  std::vector<float> unnormalized_importance(num_logged, 0.0F);
   std::vector<float> normalized_weights(num_logged, 0.0F);
   for (int i = 0; i < num_logged; ++i)
   {
     const float w = weights_eig(i);
-    unnormalized_importance[i] = w;
     normalized_weights[i] = (normalizer > 0.0F) ? w / normalizer : 0.0F;
-    // log(0) guard: degenerate-zero rollouts get a saturated cost so they sit in the tail.
     raw_costs[i] = (w > 0.0F) ? (baseline - kLambda * std::log(w)) : (baseline + 1.0e30F);
   }
 
-  // We want to visualize the actual rollouts that the GPU sampled. The library's GPU output
-  // buffer (output_d_) is not reliably accessible from the host (the split dynamics kernel
-  // writes to it but the contents do not survive the kernel boundary in any way the public API
-  // can read). The reliably-accessible thing the GPU produces is the control noise samples in
-  // the sampling distribution's device buffer. Pull those off the GPU and replay each rollout
-  // through the dynamics model on the host to recover the per-rollout (x, y, yaw, vel) trajs.
-  const int H = kMppiHorizon;
-  std::vector<float> host_controls(static_cast<size_t>(num_logged) * H * DYN::CONTROL_DIM);
-  {
-    float* device_controls = sampler.getControlSample(0, 0, 0);
-    HANDLE_ERROR(cudaMemcpy(host_controls.data(), device_controls, host_controls.size() * sizeof(float),
-                            cudaMemcpyDeviceToHost));
-  }
-
-  using OutputTraj = Mppi::output_trajectory;
-  std::vector<OutputTraj> sampled_outputs(num_logged, OutputTraj::Zero());
-  {
-    typename DYN::state_array x_local;
-    typename DYN::state_array x_next = model.getZeroState();
-    typename DYN::state_array xdot = model.getZeroState();
-    typename DYN::output_array y_t = DYN::output_array::Zero();
-    typename DYN::control_array u_local = DYN::control_array::Zero();
-    for (int i = 0; i < num_logged; ++i)
-    {
-      x_local = x;
-      for (int t = 0; t < H; ++t)
-      {
-        const float* src = host_controls.data() + (i * H + t) * DYN::CONTROL_DIM;
-        for (int d = 0; d < DYN::CONTROL_DIM; ++d)
-        {
-          u_local(d) = src[d];
-        }
-        model.enforceConstraints(x_local, u_local);
-        model.step(x_local, x_next, xdot, u_local, y_t, static_cast<float>(t), kDt);
-        sampled_outputs[i].col(t) = y_t;
-        x_local = x_next;
-      }
-    }
-  }
-
-  // Read the optimal control sequence produced by step (2) above. In a real
-  // sim-loop this is read immediately as `u_opt.col(0)` and applied via
-  // model.step (which is what step (3), the missing state update, would do).
-  // Here it's deferred until now only so the analysis CSV writers below can
-  // dump the full horizon u_opt for plotting.
   const Mppi::control_trajectory u_opt = controller.getControlSeq();
-
-  mppi::rollout_csv::writeMeta<DYN>(prefix + "_meta.csv", x, kDt, kLambda, kMppiHorizon, kNumRollouts, num_logged,
-                                    baseline, normalizer);
-  mppi::rollout_csv::writeCosts(prefix + "_costs.csv", raw_costs, unnormalized_importance, normalized_weights);
-  mppi::rollout_csv::writeCombinedTrajectory<DYN>(model, x, u_opt, prefix + "_combined.csv", kDt);
-  mppi::rollout_csv::writeRolloutTrajectories<DYN>(prefix + "_rollouts_xy.csv", x, kMppiHorizon, sampled_outputs);
+  data_mgr.dumpSingleIterationFromController(x, controller, model, sampler, kMppiHorizon, kLambda, kDt, u_opt,
+                                             kRolloutOutIdx);
 
   const auto min_it = std::min_element(raw_costs.begin(), raw_costs.end());
   const int best_idx = static_cast<int>(std::distance(raw_costs.begin(), min_it));
@@ -290,7 +245,9 @@ int main(int argc, char** argv)
                  "           (lambda=" << kLambda << " is too large relative to the cost spread). "
                  "Try --lambda smaller.\n";
   }
-  std::cout << "Wrote " << prefix << "_meta.csv, _costs.csv, _combined.csv, _rollouts_xy.csv\n";
-  std::cout << "Plot: python3 examples/plot_mppi_rollout_analysis.py " << prefix << "\n";
+  std::cout << "Wrote " << prefix << "_meta.csv, _costs.csv, _combined.csv, _rollouts_xy.csv (top "
+            << mppi::data::kDefaultTopRollouts << " trajectories)\n";
+  std::cout << "Plot: python3 scripts/mppi/plot_mppi_rollout_analysis.py " << prefix << "\n";
+  std::cout << "Retune: python3 scripts/mppi/plot_mppi_lambda_retune.py " << prefix << "\n";
   return 0;
 }

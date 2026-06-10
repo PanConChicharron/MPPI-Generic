@@ -2,20 +2,20 @@
  * Header-only CSV writers for MPPI rollout / iteration analysis.
  *
  * All writers are templated on the dynamics type so they can be reused across
- * different `*_mppi_rollout_analysis_example.cu` style examples. The dynamics
- * type must expose `DYN_T::DYN_PARAMS_T` with `StateIndex`, `OutputIndex`, and
- * `ControlIndex` enums (the convention used by every dynamics class in this
- * repo, e.g. `DubinsBicycle`).
+ * different examples. The dynamics type must expose `DYN_T::DYN_PARAMS_T` with
+ * `StateIndex`, `OutputIndex`, and `ControlIndex` enums.
  *
- * Schemas (in lock-step with `examples/plot_mppi_rollout_analysis.py`):
+ * Schemas (in lock-step with `scripts/mppi/plot_mppi_rollout_analysis.py` and
+ * `scripts/mppi/plot_mppi_rollouts_at_step.py`):
  *   <prefix>_centerline.csv : x_m,y_m
  *   <prefix>_meta.csv       : key,value
  *   <prefix>_costs.csv      : rollout_index,raw_cost,unnormalized_importance,normalized_weight
  *   <prefix>_combined.csv   : step,t,x,y,yaw,vel_x,steer,u_accel,u_steer
  *   <prefix>_rollouts_xy.csv: rollout_index,step,x,y,yaw,vel_x
+ *   <prefix>_rollouts_controls.csv: rollout_index,step,u_accel,u_steer
  */
-#ifndef MPPI_ROLLOUT_CSV_HPP_
-#define MPPI_ROLLOUT_CSV_HPP_
+#ifndef MPPI_UTILS_ROLLOUT_CSV_HPP_
+#define MPPI_UTILS_ROLLOUT_CSV_HPP_
 
 #include <Eigen/Dense>
 #include <mppi/path/path2d.hpp>
@@ -49,9 +49,8 @@ inline void writeCenterline(const mppi::path::Path2D& path, const std::string& p
 }
 
 /**
- * Sister to `writeCenterline` for the closed-loop tracking examples that pass
- * a full log path like "foo.csv": writes "foo_centerline.csv" (or appends
- * "_centerline.csv" if the path doesn't end in ".csv").
+ * Sister to `writeCenterline` for closed-loop tracking examples that pass
+ * a full log path like "foo.csv": writes "foo_centerline.csv".
  */
 inline void writeCenterlineForLog(const mppi::path::Path2D& path, const std::string& log_csv_path)
 {
@@ -80,7 +79,8 @@ inline void writeCenterlineForLog(const mppi::path::Path2D& path, const std::str
 
 template <class DYN_T>
 void writeMeta(const std::string& path, const typename DYN_T::state_array& x, float dt, float lambda, int horizon,
-               int num_rollouts, int num_logged_traj, float baseline, float normalizer)
+               int num_rollouts, int num_logged_traj, float baseline, float normalizer, int sim_step = -1,
+               float sim_time = -1.0F)
 {
   using S = typename DYN_T::DYN_PARAMS_T::StateIndex;
   std::ofstream f(path.c_str());
@@ -96,6 +96,14 @@ void writeMeta(const std::string& path, const typename DYN_T::state_array& x, fl
   f << "lambda," << lambda << "\n";
   f << "baseline," << baseline << "\n";
   f << "normalizer," << normalizer << "\n";
+  if (sim_step >= 0)
+  {
+    f << "sim_step," << sim_step << "\n";
+  }
+  if (sim_time >= 0.0F)
+  {
+    f << "sim_time," << sim_time << "\n";
+  }
   f << "init_pos_x," << x(static_cast<int>(S::POS_X)) << "\n";
   f << "init_pos_y," << x(static_cast<int>(S::POS_Y)) << "\n";
   f << "init_yaw," << x(static_cast<int>(S::YAW)) << "\n";
@@ -121,16 +129,33 @@ inline void writeCosts(const std::string& path, const std::vector<float>& raw_co
 }
 
 /**
- * Replays the optimal control sequence through the dynamics model on the host
- * to log the realized trajectory in CSV form. This is just for plotting — the
- * controls themselves came from MPPI on the GPU.
+ * Same as writeCosts but only writes the selected rollout indices (preserving
+ * the original rollout_index column for cross-referencing).
  */
+inline void writeCostsIndexed(const std::string& path, const std::vector<int>& rollout_indices,
+                                const std::vector<float>& raw_costs,
+                                const std::vector<float>& unnormalized_importance,
+                                const std::vector<float>& normalized_weights)
+{
+  std::ofstream f(path.c_str());
+  if (!f)
+  {
+    return;
+  }
+  f << "rollout_index,raw_cost,unnormalized_importance,normalized_weight\n";
+  const int n = static_cast<int>(rollout_indices.size());
+  for (int i = 0; i < n; ++i)
+  {
+    f << rollout_indices[static_cast<size_t>(i)] << "," << raw_costs[static_cast<size_t>(i)] << ","
+      << unnormalized_importance[static_cast<size_t>(i)] << "," << normalized_weights[static_cast<size_t>(i)] << "\n";
+  }
+}
+
 template <class DYN_T, class CONTROL_TRAJ_T>
 void writeCombinedTrajectory(DYN_T& model, const typename DYN_T::state_array& x0, const CONTROL_TRAJ_T& u,
                              const std::string& path, float dt)
 {
   using S = typename DYN_T::DYN_PARAMS_T::StateIndex;
-  using C = typename DYN_T::DYN_PARAMS_T::ControlIndex;
   std::ofstream f(path.c_str());
   if (!f)
   {
@@ -156,23 +181,17 @@ void writeCombinedTrajectory(DYN_T& model, const typename DYN_T::state_array& x0
     const float t = static_cast<float>(k + 1) * dt;
     f << (k + 1) << "," << t << "," << x_next(static_cast<int>(S::POS_X)) << "," << x_next(static_cast<int>(S::POS_Y))
       << "," << x_next(static_cast<int>(S::YAW)) << "," << x_next(static_cast<int>(S::VEL_X)) << ","
-      << x_next(static_cast<int>(S::STEER_ANGLE)) << "," << u_step(static_cast<int>(C::ACCEL)) << ","
-      << u_step(static_cast<int>(C::STEER)) << "\n";
+      << x_next(static_cast<int>(S::STEER_ANGLE)) << "," << u_step(0) << "," << u_step(1) << "\n";
     x = x_next;
   }
 }
 
-/**
- * Per-rollout (x, y, yaw, vel_x) trajectories. `outputs[i]` is expected to be
- * an Eigen matrix of shape (OUTPUT_DIM, horizon) for rollout `i`, indexed by
- * `DYN_T::DYN_PARAMS_T::OutputIndex`.
- */
 template <class DYN_T, class TrajT>
 void writeRolloutTrajectories(const std::string& path, const typename DYN_T::state_array& x0, int horizon,
-                              const std::vector<TrajT>& outputs)
+                              const std::vector<TrajT>& outputs, const std::vector<int>& rollout_indices, int out_x_idx,
+                              int out_y_idx, int out_yaw_idx, int out_vel_idx)
 {
   using S = typename DYN_T::DYN_PARAMS_T::StateIndex;
-  using O = typename DYN_T::DYN_PARAMS_T::OutputIndex;
   std::ofstream f(path.c_str());
   if (!f)
   {
@@ -180,24 +199,61 @@ void writeRolloutTrajectories(const std::string& path, const typename DYN_T::sta
   }
   f << "rollout_index,step,x,y,yaw,vel_x\n";
   const int n_out = static_cast<int>(outputs.size());
-  const int oix = static_cast<int>(O::POS_X);
-  const int oiy = static_cast<int>(O::POS_Y);
-  const int oiyaw = static_cast<int>(O::YAW);
-  const int oiv = static_cast<int>(O::VEL_X);
 
   for (int r = 0; r < n_out; ++r)
   {
-    f << r << ",0," << x0(static_cast<int>(S::POS_X)) << "," << x0(static_cast<int>(S::POS_Y)) << ","
+    const int rollout_index = rollout_indices.empty() ? r : rollout_indices[static_cast<size_t>(r)];
+    f << rollout_index << ",0," << x0(static_cast<int>(S::POS_X)) << "," << x0(static_cast<int>(S::POS_Y)) << ","
       << x0(static_cast<int>(S::YAW)) << "," << x0(static_cast<int>(S::VEL_X)) << "\n";
     const TrajT& traj = outputs[static_cast<size_t>(r)];
     for (int c = 0; c < horizon; ++c)
     {
-      f << r << "," << (c + 1) << "," << traj(oix, c) << "," << traj(oiy, c) << "," << traj(oiyaw, c) << ","
-        << traj(oiv, c) << "\n";
+      f << rollout_index << "," << (c + 1) << "," << traj(out_x_idx, c) << "," << traj(out_y_idx, c) << ","
+        << traj(out_yaw_idx, c) << "," << traj(out_vel_idx, c) << "\n";
+    }
+  }
+}
+
+template <class DYN_T, class TrajT>
+void writeRolloutTrajectories(const std::string& path, const typename DYN_T::state_array& x0, int horizon,
+                              const std::vector<TrajT>& outputs, const std::vector<int>& rollout_indices)
+{
+  using O = typename DYN_T::DYN_PARAMS_T::OutputIndex;
+  writeRolloutTrajectories<DYN_T, TrajT>(path, x0, horizon, outputs, rollout_indices,
+                                         static_cast<int>(O::POS_X), static_cast<int>(O::POS_Y),
+                                         static_cast<int>(O::YAW), static_cast<int>(O::VEL_X));
+}
+
+template <class DYN_T, class TrajT>
+void writeRolloutTrajectories(const std::string& path, const typename DYN_T::state_array& x0, int horizon,
+                              const std::vector<TrajT>& outputs)
+{
+  writeRolloutTrajectories<DYN_T, TrajT>(path, x0, horizon, outputs, {});
+}
+
+template <class DYN_T>
+void writeRolloutControls(const std::string& path, const std::vector<float>& host_controls, int horizon,
+                          int num_rollouts, const std::vector<int>& rollout_indices)
+{
+  std::ofstream f(path.c_str());
+  if (!f)
+  {
+    return;
+  }
+  f << "rollout_index,step,u_accel,u_steer\n";
+  const size_t stride = static_cast<size_t>(horizon) * static_cast<size_t>(DYN_T::CONTROL_DIM);
+  for (int rollout_index : rollout_indices)
+  {
+    for (int t = 0; t < horizon; ++t)
+    {
+      const float* src = host_controls.data() +
+                         (static_cast<size_t>(rollout_index) * stride +
+                          static_cast<size_t>(t) * static_cast<size_t>(DYN_T::CONTROL_DIM));
+      f << rollout_index << "," << t << "," << src[0] << "," << src[1] << "\n";
     }
   }
 }
 }  // namespace rollout_csv
 }  // namespace mppi
 
-#endif  // MPPI_ROLLOUT_CSV_HPP_
+#endif  // MPPI_UTILS_ROLLOUT_CSV_HPP_

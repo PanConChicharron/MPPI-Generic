@@ -5,11 +5,11 @@
  *
  * Build: cmake --build build --target dubins_path_tracking_example
  * Run:   ./build/examples/dubins_path_tracking_example [log.csv]
- * Plot:  python3 examples/plot_racer_dubins_temporal_mppi.py dubins_path_tracking_log.csv
+ * Plot:  python3 scripts/mppi/plot_racer_dubins_temporal_mppi.py dubins_path_tracking_log.csv
  *
- * For a circular track, use dubins_circle_path_tracking_example.cu instead.
+ * For a circular track, use examples/dubins/dubins_circle_path_tracking_example.cu instead.
  */
-#include "mppi_rollout_csv.hpp"
+#include <mppi/utils/data_manager.hpp>
 
 #include <mppi/controllers/MPPI/mppi_controller.cuh>
 #include <mppi/cost_functions/path_tracking/path_tracking_cost.cuh>
@@ -44,6 +44,13 @@ using FB = DDPFeedback<DYN, kMppiHorizon>;
 using SAMPLER = mppi::sampling_distributions::GaussianDistribution<DYN::DYN_PARAMS_T>;
 using Mppi = VanillaMPPIController<DYN, COST, FB, kMppiHorizon, kNumRollouts, SAMPLER>;
 
+const mppi::data::RolloutOutputIndices kRolloutOutIdx{
+    static_cast<int>(DubinsBicycleParams::OutputIndex::POS_X),
+    static_cast<int>(DubinsBicycleParams::OutputIndex::POS_Y),
+    static_cast<int>(DubinsBicycleParams::OutputIndex::YAW),
+    static_cast<int>(DubinsBicycleParams::OutputIndex::VEL_X),
+};
+
 void clipControl(const DubinsBicycleParams& p, DYN::control_array& u)
 {
   u(static_cast<int>(DubinsBicycleParams::ControlIndex::ACCEL)) =
@@ -66,7 +73,12 @@ int main(int argc, char** argv)
   }
 
   const mppi::path::Path2D path = mppi::path::Path2D::straightLine(0.0F, 0.0F, 100.0F, 0.0F, 64);
-  mppi::rollout_csv::writeCenterlineForLog(path, log_path);
+
+  mppi::data::MppiDataManager<DYN> data_mgr;
+  if (!data_mgr.beginRun(log_path, path, mppi::data::PathTrackingLogSchema::kRefV))
+  {
+    return 1;
+  }
 
   mppi::path::PathReferenceGenerator ref_gen(kDt);
   ref_gen.setSpeedCap(kVMax);
@@ -95,7 +107,7 @@ int main(int argc, char** argv)
 
   FB feedback(&model, kDt);
   Mppi::control_trajectory u_nom = Mppi::control_trajectory::Zero();
-  // See dubins_circle_path_tracking_example.cu for the lambda tuning rationale; the cost weights
+  // See examples/dubins/dubins_circle_path_tracking_example.cu for the lambda tuning rationale; the cost weights
   // and per-step magnitudes are the same here, so the same temperature lands in the healthy band.
   constexpr float kMppiLambda = 100.0F;
   Mppi controller(&model, &cost, &feedback, &sampler, kDt, 1, kMppiLambda, 0.0F, kMppiHorizon, u_nom);
@@ -134,22 +146,14 @@ int main(int argc, char** argv)
   float s_prog = 0.0F;
   float max_lat = 0.0F;
 
-  std::ofstream log(log_path.c_str());
-  if (!log)
-  {
-    std::cerr << "Could not open log: " << log_path << "\n";
-    return 1;
-  }
-  log << "t,pos_x,pos_y,yaw,vel_x,steer_angle,brake_state,u_accel,u_steer,nom_u_accel,nom_u_steer,ref_x,ref_y,ref_yaw,"
-         "ref_v,arc_s,lat_err,baseline\n";
-  log << std::scientific;
-
   std::cout << "Dubins straight path tracking  path_length=" << path.length() << " m\n";
   std::cout << "Logging to " << log_path << "\n";
 
   const auto t0 = std::chrono::steady_clock::now();
   for (int k = 0; k < kSimSteps; ++k)
   {
+    const float sim_time = static_cast<float>(k) * kDt;
+
     const mppi::path::PathProjection proj = mppi::path::projectPoseOntoPath(
         path, x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_X)),
         x(static_cast<int>(DubinsBicycleParams::StateIndex::POS_Y)), s_prog);
@@ -169,7 +173,12 @@ int main(int argc, char** argv)
     mppi::path::fillNominalControlFromReference(u_nom, x, ref, dyn, kDt, &path);
     controller.updateImportanceSampler(u_nom);
     controller.computeControl(x, 1);
-    const DYN::control_array u_apply = controller.getControlSeq().col(0);
+    cudaStreamSynchronize(controller.stream_);
+    controller.calculateSampledStateTrajectories();
+    const Mppi::control_trajectory u_opt_traj = controller.getControlSeq();
+    data_mgr.dumpRolloutSnapshot(k, sim_time, x, controller, model, sampler, kMppiHorizon, kMppiLambda, kDt,
+                                 u_opt_traj, kRolloutOutIdx);
+    const DYN::control_array u_apply = u_opt_traj.col(0);
     DYN::control_array u = u_apply;
     clipControl(dyn, u);
     const float baseline = static_cast<float>(controller.getBaselineCost());
@@ -178,16 +187,25 @@ int main(int argc, char** argv)
 
     const mppi::path::PathReferenceSample& r0 = ref.front();
     const float t_end = static_cast<float>(k + 1) * kDt;
-    log << t_end << "," << x_next(static_cast<int>(DubinsBicycleParams::StateIndex::POS_X)) << ","
-        << x_next(static_cast<int>(DubinsBicycleParams::StateIndex::POS_Y)) << ","
-        << x_next(static_cast<int>(DubinsBicycleParams::StateIndex::YAW)) << ","
-        << x_next(static_cast<int>(DubinsBicycleParams::StateIndex::VEL_X)) << ","
-        << x_next(static_cast<int>(DubinsBicycleParams::StateIndex::STEER_ANGLE)) << ",0,"
-        << u(static_cast<int>(DubinsBicycleParams::ControlIndex::ACCEL)) << ","
-        << u(static_cast<int>(DubinsBicycleParams::ControlIndex::STEER)) << ","
-        << u_apply(static_cast<int>(DubinsBicycleParams::ControlIndex::ACCEL)) << ","
-        << u_apply(static_cast<int>(DubinsBicycleParams::ControlIndex::STEER)) << "," << r0.x << "," << r0.y << ","
-        << r0.yaw << "," << r0.v << "," << s_prog << "," << proj.signed_lateral_error << "," << baseline << "\n";
+    mppi::data::PathTrackingStepLog step_log{};
+    step_log.t = t_end;
+    step_log.pos_x = x_next(static_cast<int>(DubinsBicycleParams::StateIndex::POS_X));
+    step_log.pos_y = x_next(static_cast<int>(DubinsBicycleParams::StateIndex::POS_Y));
+    step_log.yaw = x_next(static_cast<int>(DubinsBicycleParams::StateIndex::YAW));
+    step_log.vel_x = x_next(static_cast<int>(DubinsBicycleParams::StateIndex::VEL_X));
+    step_log.steer_angle = x_next(static_cast<int>(DubinsBicycleParams::StateIndex::STEER_ANGLE));
+    step_log.u_accel = u(static_cast<int>(DubinsBicycleParams::ControlIndex::ACCEL));
+    step_log.u_steer = u(static_cast<int>(DubinsBicycleParams::ControlIndex::STEER));
+    step_log.nom_u_accel = u_apply(static_cast<int>(DubinsBicycleParams::ControlIndex::ACCEL));
+    step_log.nom_u_steer = u_apply(static_cast<int>(DubinsBicycleParams::ControlIndex::STEER));
+    step_log.ref_x = r0.x;
+    step_log.ref_y = r0.y;
+    step_log.ref_yaw = r0.yaw;
+    step_log.ref_v = r0.v;
+    step_log.arc_s = s_prog;
+    step_log.lat_err = proj.signed_lateral_error;
+    step_log.baseline = baseline;
+    data_mgr.logPathTrackingStep(step_log);
 
     x = x_next;
     controller.slideControlSequence(1);
@@ -199,9 +217,10 @@ int main(int argc, char** argv)
     }
   }
 
-  log.close();
+  data_mgr.close();
   const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
   std::cout << "Done. max |lateral|=" << max_lat << " m  elapsed=" << elapsed << " s\n";
-  std::cout << "Plot: python3 examples/plot_racer_dubins_temporal_mppi.py " << log_path << "\n";
+  std::cout << "Wrote " << log_path << " and rollout snapshots under " << data_mgr.rolloutDirectory() << "\n";
+  std::cout << "Plot: python3 scripts/mppi/plot_racer_dubins_temporal_mppi.py " << log_path << "\n";
   return 0;
 }

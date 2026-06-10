@@ -3,7 +3,7 @@
  *
  * Build: cmake --build build --target dubins_circle_mppi_rollout_analysis_example
  * Run:   ./build/examples/dubins_circle_mppi_rollout_analysis_example [output_prefix]
- * Plot:  python3 examples/plot_mppi_rollout_analysis.py dubins_circle_mppi_rollout_analysis
+ * Plot:  python3 scripts/mppi/plot_mppi_rollout_analysis.py dubins_circle_mppi_rollout_analysis
  *
  * Uses the standard MPPI pipeline (no custom kernels):
  *   computeControl  →  calculateSampledStateTrajectories  →  getSampledOutputTrajectories
@@ -11,7 +11,7 @@
  * Per-rollout cost is the sum of the visualize-cost kernel's per-timestep cost,
  * and weights are exp(-(cost-baseline)/lambda) / normalizer.
  */
-#include "mppi_rollout_csv.hpp"
+#include <mppi/utils/data_manager.hpp>
 
 #include <mppi/controllers/MPPI/mppi_controller.cuh>
 #include <mppi/cost_functions/path_tracking/path_tracking_cost.cuh>
@@ -69,7 +69,13 @@ int main(int argc, char** argv)
 
   const mppi::path::Path2D path =
       mppi::path::Path2D::circle(kCircleCenterX, kCircleCenterY, kCircleRadius, kCircleTheta0, kCirclePlotSamples);
-  mppi::rollout_csv::writeCenterline(path, prefix);
+  mppi::data::MppiDataManager<DYN> data_mgr;
+  data_mgr.beginAnalysisRun(prefix, path);
+  const mppi::data::RolloutOutputIndices kRolloutOutIdx(
+      static_cast<int>(DubinsBicycleParams::OutputIndex::POS_X),
+      static_cast<int>(DubinsBicycleParams::OutputIndex::POS_Y),
+      static_cast<int>(DubinsBicycleParams::OutputIndex::YAW),
+      static_cast<int>(DubinsBicycleParams::OutputIndex::VEL_X));
 
   mppi::path::PathReferenceGenerator ref_gen(kDt);
   ref_gen.setSpeedCap(kVMax);
@@ -199,12 +205,8 @@ int main(int argc, char** argv)
   }
 
   const Mppi::control_trajectory u_opt = controller.getControlSeq();
-
-  mppi::rollout_csv::writeMeta<DYN>(prefix + "_meta.csv", x, kDt, kLambda, kMppiHorizon, kNumRollouts, num_logged,
-                                    baseline, normalizer);
-  mppi::rollout_csv::writeCosts(prefix + "_costs.csv", raw_costs, unnormalized_importance, normalized_weights);
-  mppi::rollout_csv::writeCombinedTrajectory<DYN>(model, x, u_opt, prefix + "_combined.csv", kDt);
-  mppi::rollout_csv::writeRolloutTrajectories<DYN>(prefix + "_rollouts_xy.csv", x, kMppiHorizon, sampled_outputs);
+  data_mgr.template dumpSingleIterationHostReplay<Mppi::output_trajectory>(
+      x, model, sampler, kMppiHorizon, kLambda, kDt, num_logged, u_opt, raw_costs, baseline, kRolloutOutIdx);
 
   const auto min_it = std::min_element(raw_costs.begin(), raw_costs.end());
   const int best_idx = static_cast<int>(std::distance(raw_costs.begin(), min_it));
@@ -213,7 +215,9 @@ int main(int argc, char** argv)
   std::cout << "  best rollout index=" << best_idx << "  raw_cost=" << raw_costs[best_idx]
             << "  weight=" << normalized_weights[best_idx] << "\n";
   std::cout << "  (slot 0 is the optimal/combined trajectory; slots i>=1 are rollout i)\n";
-  std::cout << "Wrote " << prefix << "_meta.csv, _costs.csv, _combined.csv, _rollouts_xy.csv\n";
-  std::cout << "Plot: python3 examples/plot_mppi_rollout_analysis.py " << prefix << "\n";
+  std::cout << "Wrote " << prefix << "_meta.csv, _costs.csv, _combined.csv, _rollouts_xy.csv (top "
+            << mppi::data::kDefaultTopRollouts << " trajectories)\n";
+  std::cout << "Plot: python3 scripts/mppi/plot_mppi_rollout_analysis.py " << prefix << "\n";
+  std::cout << "Retune: python3 scripts/mppi/plot_mppi_lambda_retune.py " << prefix << "\n";
   return 0;
 }

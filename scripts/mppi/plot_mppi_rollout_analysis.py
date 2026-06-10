@@ -1,97 +1,30 @@
 #!/usr/bin/env python3
-"""Visualize one MPPI iteration: all rollouts (alpha = weight), costs, combined trajectory.
+"""Visualize one MPPI iteration: top rollouts colored purple (low) to green (high weight).
 
 Usage:
-  python3 examples/plot_mppi_rollout_analysis.py dubins_circle_mppi_rollout_analysis
-  python3 examples/plot_mppi_rollout_analysis.py dubins_circle_mppi_rollout_analysis --no-show
+  python3 scripts/mppi/plot_mppi_rollout_analysis.py dubins_circle_mppi_rollout_analysis
+  python3 scripts/mppi/plot_mppi_rollout_analysis.py dubins_circle_mppi_rollout_analysis --no-show
 """
 from __future__ import annotations
 
 import argparse
-import csv
 import os
 import sys
 from pathlib import Path
 
 import numpy as np
 
-
-def load_meta(path: Path) -> dict[str, float]:
-    out: dict[str, float] = {}
-    with path.open(newline="") as f:
-        for row in csv.DictReader(f):
-            out[row["key"]] = float(row["value"])
-    return out
-
-
-def load_costs(path: Path) -> dict[str, np.ndarray]:
-    idx, raw, unnorm, norm = [], [], [], []
-    with path.open(newline="") as f:
-        for row in csv.DictReader(f):
-            idx.append(int(row["rollout_index"]))
-            raw.append(float(row["raw_cost"]))
-            unnorm.append(float(row["unnormalized_importance"]))
-            norm.append(float(row["normalized_weight"]))
-    return {
-        "index": np.asarray(idx, dtype=int),
-        "raw_cost": np.asarray(raw),
-        "unnormalized": np.asarray(unnorm),
-        "normalized": np.asarray(norm),
-    }
-
-
-def load_rollout_segments(path: Path) -> tuple[list[np.ndarray], np.ndarray]:
-    """Build LineCollection segments and rollout indices (one segment per rollout)."""
-    data = np.loadtxt(path, delimiter=",", skiprows=1)
-    if data.ndim == 1:
-        data = data.reshape(1, -1)
-    rollout_ids = data[:, 0].astype(int)
-    steps = data[:, 1].astype(int)
-    xy = data[:, 2:4]
-
-    unique_ids = np.unique(rollout_ids)
-    segments: list[np.ndarray] = []
-    seg_ids: list[int] = []
-    for rid in unique_ids:
-        mask = rollout_ids == rid
-        order = np.argsort(steps[mask])
-        pts = xy[mask][order]
-        if len(pts) >= 2:
-            segments.append(pts)
-            seg_ids.append(int(rid))
-    return segments, np.asarray(seg_ids, dtype=int)
-
-
-
-
-def load_combined(path: Path) -> dict[str, np.ndarray]:
-    cols: dict[str, list[float]] = {
-        k: [] for k in ("step", "t", "x", "y", "yaw", "vel", "steer", "u_accel", "u_steer")
-    }
-    with path.open(newline="") as f:
-        for row in csv.DictReader(f):
-            cols["step"].append(int(row["step"]))
-            cols["t"].append(float(row["t"]))
-            cols["x"].append(float(row["x"]))
-            cols["y"].append(float(row["y"]))
-            cols["yaw"].append(float(row["yaw"]))
-            cols["vel"].append(float(row["vel_x"]))
-            cols["steer"].append(float(row["steer"]))
-            cols["u_accel"].append(float(row["u_accel"]))
-            cols["u_steer"].append(float(row["u_steer"]))
-    return {k: np.asarray(v) for k, v in cols.items()}
-
-
-def weight_to_alpha(weights: np.ndarray, alpha_min: float = 0.03, alpha_max: float = 0.55) -> np.ndarray:
-    """Map normalized MPPI weights to line alpha (sqrt stretch helps low-weight rollouts)."""
-    w = np.asarray(weights, dtype=float)
-    if w.size == 0:
-        return w
-    w_max = float(np.max(w))
-    if w_max <= 0:
-        return np.full_like(w, alpha_min)
-    t = np.sqrt(np.clip(w / w_max, 0.0, 1.0))
-    return alpha_min + (alpha_max - alpha_min) * t
+from mppi_plot_utils import (
+    load_centerline,
+    load_combined,
+    load_costs,
+    load_meta,
+    load_rollout_segments,
+    sort_rollouts_for_draw,
+    weight_to_purple_green,
+    weight_to_rollout_linewidths,
+    weights_for_rollout_ids,
+)
 
 
 def display_available() -> bool:
@@ -106,8 +39,7 @@ def main() -> int:
     p.add_argument("-o", "--output", type=Path, default=None, help="Output PNG path")
     p.add_argument("--no-show", action="store_true")
     p.add_argument("--show", action="store_true")
-    p.add_argument("--alpha-min", type=float, default=0.03, help="Alpha for lowest-weight rollout")
-    p.add_argument("--alpha-max", type=float, default=0.55, help="Alpha for highest-weight rollout")
+    p.add_argument("--top-n", type=int, default=400, help="Draw at most this many highest-weight rollouts")
     p.add_argument("--zoom-pad", type=float, default=2.0,
                    help="Padding [m] around rollout bounding box (use --zoom-pad=-1 for full centerline view)")
     p.add_argument("--no-inset", action="store_true", help="Skip the small full-track overview inset")
@@ -140,7 +72,7 @@ def main() -> int:
 
     meta = load_meta(meta_path)
     costs = load_costs(costs_path)
-    segments, seg_ids = load_rollout_segments(rollouts_path)
+    segments, seg_ids, _ = load_rollout_segments(rollouts_path)
     combined = load_combined(combined_path)
 
     raw = costs["raw_cost"]
@@ -148,20 +80,16 @@ def main() -> int:
     baseline = meta.get("baseline", float(np.min(raw)))
     normalizer = meta.get("normalizer", float(np.sum(costs["unnormalized"])))
 
-    # weights[rollout_index] — index column is 0..N-1
-    w_by_rollout = np.zeros(int(meta.get("num_rollouts", len(weights))), dtype=float)
-    for i, r in enumerate(costs["index"]):
-        if 0 <= r < w_by_rollout.size:
-            w_by_rollout[r] = weights[i]
-    seg_weights = w_by_rollout[seg_ids]
-    seg_alphas = weight_to_alpha(seg_weights, args.alpha_min, args.alpha_max)
+    seg_weights = weights_for_rollout_ids(costs, seg_ids)
+    if args.top_n > 0 and len(seg_ids) > args.top_n:
+        order = np.argsort(seg_weights)[::-1][: args.top_n]
+        segments = [segments[i] for i in order]
+        seg_ids = seg_ids[order]
+        seg_weights = seg_weights[order]
+    segments, seg_weights, seg_ids = sort_rollouts_for_draw(segments, seg_weights, seg_ids)
+    seg_colors = weight_to_purple_green(seg_weights)
 
-    cpx = cpy = None
-    if centerline_path.is_file():
-        cxy = np.loadtxt(centerline_path, delimiter=",", skiprows=1)
-        if cxy.ndim == 1:
-            cxy = cxy.reshape(1, -1)
-        cpx, cpy = cxy[:, 0], cxy[:, 1]
+    cpx, cpy = load_centerline(centerline_path)
 
     fig = plt.figure(figsize=(14, 13))
     gs = fig.add_gridspec(3, 3, height_ratios=[1.55, 0.95, 0.85], width_ratios=[1.2, 1, 1],
@@ -171,13 +99,7 @@ def main() -> int:
     if cpx is not None:
         ax_xy.plot(cpx, cpy, "r-", linewidth=1.5, label="ref centerline", zorder=1)
 
-    lc = LineCollection(
-        segments,
-        colors=(0.15, 0.35, 0.65, 1.0),
-        linewidths=0.45,
-        zorder=2,
-    )
-    lc.set_alpha(seg_alphas)
+    lc = LineCollection(segments, colors=seg_colors, linewidths=weight_to_rollout_linewidths(seg_weights), zorder=2)
     ax_xy.add_collection(lc)
 
     ax_xy.plot(combined["x"], combined["y"], "k-", linewidth=2.2, label="MPPI combined (optimal u)", zorder=5)
@@ -185,7 +107,6 @@ def main() -> int:
 
     seg_index_lookup: dict[int, int] = {int(rid): i for i, rid in enumerate(seg_ids)}
 
-    # Rollout 0 is the noise-free / pre-iteration nominal rollout in this codebase's GaussianDistribution.
     if 0 in seg_index_lookup:
         si = seg_index_lookup[0]
         ax_xy.plot(
@@ -205,7 +126,6 @@ def main() -> int:
 
     best_c_i = int(costs["index"][int(np.argmin(raw))])
 
-    # Zoom to rollout bounding box (with the start point + combined trajectory so they stay in frame).
     all_xy = np.vstack(segments + [np.column_stack([combined["x"], combined["y"]])])
     x_min, y_min = all_xy.min(axis=0)
     x_max, y_max = all_xy.max(axis=0)
@@ -219,18 +139,15 @@ def main() -> int:
     ax_xy.set_xlabel("x [m]")
     ax_xy.set_ylabel("y [m]")
     n_drawn = len(segments)
-    n_total = int(meta.get("num_rollouts", len(raw)))
     span_m = float(np.hypot(x_max - x_min, y_max - y_min))
     ax_xy.set_title(
-        f"All MPPI rollouts (n={n_drawn}/{n_total}, line α ∝ √weight)  "
+        f"Top {n_drawn} MPPI rollouts (purple low → green high weight)  "
         f"v₀={meta.get('init_vel_x', 0):.2f} m/s  λ={meta.get('lambda', 0):.3g}  "
         f"rollout cluster ≈ {span_m:.2f} m"
     )
     ax_xy.grid(True, alpha=0.3)
     ax_xy.legend(loc="best", fontsize=8)
 
-    # Small overview inset showing the full track + the zoomed rectangle. Uses the modern
-    # Axes.inset_axes API (axes_grid1.inset_locator interferes with the interactive toolbar).
     if not args.no_inset and cpx is not None and args.zoom_pad >= 0:
         ax_inset = ax_xy.inset_axes([0.02, 0.02, 0.18, 0.30])
         ax_inset.plot(cpx, cpy, "r-", linewidth=0.9)
@@ -267,9 +184,6 @@ def main() -> int:
     ax_sc.grid(True, alpha=0.3)
     fig.colorbar(sc, ax=ax_sc, label="weight")
 
-    # Optimal control commands over the MPPI horizon. combined.csv carries u_accel/u_steer (the
-    # MPPI-optimal command) and the realized steer state, which lags the command through the
-    # bicycle's first-order steer dynamics (visible at the corner-entry curvature step).
     sub = gs[2, :].subgridspec(2, 1, hspace=0.15)
     ax_ua = fig.add_subplot(sub[0, 0])
     ax_us = fig.add_subplot(sub[1, 0], sharex=ax_ua)
@@ -284,8 +198,7 @@ def main() -> int:
     plt.setp(ax_ua.get_xticklabels(), visible=False)
 
     ax_us.plot(t, combined["u_steer"], color="tab:red", linewidth=1.7, label="u_steer (cmd)")
-    if "steer" in combined:
-        ax_us.plot(t, combined["steer"], color="0.4", linewidth=1.2, linestyle="--", label="steer state")
+    ax_us.plot(t, combined["steer"], color="0.4", linewidth=1.2, linestyle="--", label="steer state")
     ax_us.axhline(0.0, color="0.7", linewidth=0.6, linestyle="--")
     ax_us.set_xlabel("t [s]")
     ax_us.set_ylabel("u_steer [rad]")
@@ -301,7 +214,7 @@ def main() -> int:
 
     out_png = args.output if args.output is not None else Path(str(base) + "_viz.png")
     fig.savefig(out_png, dpi=150, bbox_inches="tight")
-    print(f"Drew {n_drawn} rollouts (alpha from weight, range [{args.alpha_min}, {args.alpha_max}])")
+    print(f"Drew {n_drawn} rollouts (purple→green by weight, top {args.top_n})")
     print(f"Wrote {out_png}")
     if want_show:
         print("Close plot window to exit.")
