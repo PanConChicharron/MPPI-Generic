@@ -1,9 +1,18 @@
 #!/usr/bin/env python3
 """Visualize one MPPI iteration: top rollouts colored purple (low) to green (high weight).
 
+Works with both dump formats:
+  - Single-iteration analysis (``*_mppi_rollout_analysis_example``)
+  - Closed-loop per-step snapshots (``*_two_lane_double_park_example``, etc.)
+
+For temporal plots over the **entire run** (path, controls, arc length vs time), use
+``plot_racer_dubins_temporal_mppi.py`` on the temporal ``*_log.csv``.
+
 Usage:
   python3 scripts/mppi/plot_mppi_rollout_analysis.py dubins_circle_mppi_rollout_analysis
-  python3 scripts/mppi/plot_mppi_rollout_analysis.py dubins_circle_mppi_rollout_analysis --no-show
+  python3 scripts/mppi/plot_mppi_rollout_analysis.py first_order_dubins_two_lane_double_park_log.csv --step 42
+  python3 scripts/mppi/plot_mppi_rollout_analysis.py first_order_dubins_two_lane_double_park_log_rollouts/step_000042
+  python3 scripts/mppi/plot_mppi_rollout_analysis.py dubins_circle_mppi_rollout_analysis --no-show -o viz.png
 """
 from __future__ import annotations
 
@@ -23,6 +32,7 @@ from mppi_plot_utils import (
     load_meta,
     load_rollout_segments,
     enable_scroll_zoom,
+    resolve_rollout_snapshot,
     sort_rollouts_for_draw,
     weight_to_purple_green,
     weight_to_rollout_linewidths,
@@ -36,9 +46,20 @@ def display_available() -> bool:
     return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
 
 
+def default_output_path(snapshot) -> Path:
+    if snapshot.analysis_base is not None:
+        return Path(str(snapshot.analysis_base) + "_viz.png")
+    return snapshot.step_dir / "rollout_analysis_viz.png"
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("prefix", type=Path, help="Log file prefix (no extension)")
+    p.add_argument(
+        "path",
+        type=Path,
+        help="Analysis prefix, temporal log CSV, rollouts directory, or step_*/ folder",
+    )
+    p.add_argument("--step", type=int, default=0, help="Simulation step (closed-loop logs only)")
     p.add_argument("-o", "--output", type=Path, default=None, help="Output PNG path")
     p.add_argument("--no-show", action="store_true")
     p.add_argument("--show", action="store_true")
@@ -48,16 +69,15 @@ def main() -> int:
     p.add_argument("--no-inset", action="store_true", help="Skip the small full-track overview inset")
     args = p.parse_args()
 
-    base = args.prefix if args.prefix.suffix == "" else args.prefix.with_suffix("")
-    meta_path = Path(str(base) + "_meta.csv")
-    costs_path = Path(str(base) + "_costs.csv")
-    rollouts_path = Path(str(base) + "_rollouts_xy.csv")
-    combined_path = Path(str(base) + "_combined.csv")
-    centerline_path = Path(str(base) + "_centerline.csv")
-
-    for req in (meta_path, costs_path, rollouts_path, combined_path):
+    snapshot = resolve_rollout_snapshot(args.path, args.step)
+    for req in (snapshot.meta_path, snapshot.costs_path, snapshot.rollouts_path, snapshot.combined_path):
         if not req.is_file():
             print(f"error: missing {req}", file=sys.stderr)
+            if snapshot.log_csv is not None and args.step != 0:
+                print(
+                    f"hint: re-run the example to generate step {args.step}, or pick another --step",
+                    file=sys.stderr,
+                )
             return 1
 
     want_show = args.show or (not args.no_show and display_available())
@@ -73,10 +93,10 @@ def main() -> int:
         print(e, file=sys.stderr)
         return 1
 
-    meta = load_meta(meta_path)
-    costs = load_costs(costs_path)
-    segments, seg_ids, _ = load_rollout_segments(rollouts_path)
-    combined = load_combined(combined_path)
+    meta = load_meta(snapshot.meta_path)
+    costs = load_costs(snapshot.costs_path)
+    segments, seg_ids, _ = load_rollout_segments(snapshot.rollouts_path)
+    combined = load_combined(snapshot.combined_path)
 
     raw = costs["raw_cost"]
     weights = costs["normalized"]
@@ -92,7 +112,14 @@ def main() -> int:
     segments, seg_weights, seg_ids = sort_rollouts_for_draw(segments, seg_weights, seg_ids)
     seg_colors = weight_to_purple_green(seg_weights)
 
-    cpx, cpy = load_centerline(centerline_path)
+    if snapshot.centerline_path is not None:
+        cpx, cpy = load_centerline(snapshot.centerline_path)
+    else:
+        cpx, cpy = None, None
+
+    log_hint = snapshot.log_csv or snapshot.analysis_base or snapshot.step_dir
+    sim_step = int(meta.get("sim_step", args.step))
+    sim_time = float(meta.get("sim_time", sim_step * meta.get("dt", 0.1)))
 
     fig = plt.figure(figsize=(14, 13))
     gs = fig.add_gridspec(3, 3, height_ratios=[1.55, 0.95, 0.85], width_ratios=[1.2, 1, 1],
@@ -100,7 +127,7 @@ def main() -> int:
 
     ax_xy = fig.add_subplot(gs[0, :])
     if cpx is not None:
-        left_b, right_b = load_boundary_limits(meta, log_hint=base)
+        left_b, right_b = load_boundary_limits(meta, log_hint=log_hint)
         draw_road_boundaries(ax_xy, cpx, cpy, left_b, right_b)
         ax_xy.plot(cpx, cpy, "r-", linewidth=1.5, label="ref centerline", zorder=2)
 
@@ -134,6 +161,7 @@ def main() -> int:
     all_xy = np.vstack(segments + [np.column_stack([combined["x"], combined["y"]])])
     x_min, y_min = all_xy.min(axis=0)
     x_max, y_max = all_xy.max(axis=0)
+    pad = 0.0
     if args.zoom_pad >= 0:
         pad = max(args.zoom_pad, 0.05 * max(x_max - x_min, y_max - y_min, 1e-3))
         ax_xy.set_xlim(x_min - pad, x_max + pad)
@@ -145,8 +173,9 @@ def main() -> int:
     ax_xy.set_ylabel("y [m]")
     n_drawn = len(segments)
     span_m = float(np.hypot(x_max - x_min, y_max - y_min))
+    step_label = f"step {sim_step}  t={sim_time:.2f}s  " if snapshot.rollout_root is not None else ""
     ax_xy.set_title(
-        f"Top {n_drawn} MPPI rollouts (purple low → green high weight)  "
+        f"{step_label}Top {n_drawn} MPPI rollouts (purple low → green high weight)  "
         f"v₀={meta.get('init_vel_x', 0):.2f} m/s  λ={meta.get('lambda', 0):.3g}  "
         f"rollout cluster ≈ {span_m:.2f} m"
     )
@@ -217,9 +246,9 @@ def main() -> int:
         fontsize=10,
     )
 
-    out_png = args.output if args.output is not None else Path(str(base) + "_viz.png")
+    out_png = args.output if args.output is not None else default_output_path(snapshot)
     fig.savefig(out_png, dpi=150, bbox_inches="tight")
-    print(f"Drew {n_drawn} rollouts (purple→green by weight, top {args.top_n})")
+    print(f"Drew {n_drawn} rollouts from {snapshot.step_dir}")
     print(f"Wrote {out_png}")
     if want_show:
         zoom_axes = [ax_xy, ax_cost, ax_w, ax_sc, ax_ua, ax_us]

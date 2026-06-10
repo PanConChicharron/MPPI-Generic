@@ -10,8 +10,12 @@
 #
 # Usage:
 #   python3 scripts/mppi/plot_racer_dubins_temporal_mppi.py dubins_path_tracking_log.csv
+#   python3 scripts/mppi/plot_racer_dubins_temporal_mppi.py first_order_dubins_two_lane_double_park_log.csv
 #   python3 scripts/mppi/plot_racer_dubins_temporal_mppi.py log.csv -o viz.png
 #   python3 scripts/mppi/plot_racer_dubins_temporal_mppi.py log.csv --no-show
+#
+# For per-step MPPI rollout clouds (not full-run time series), use:
+#   plot_mppi_rollout_analysis.py  or  plot_mppi_rollouts_at_step.py  on the same log + --step N
 
 import argparse
 import csv

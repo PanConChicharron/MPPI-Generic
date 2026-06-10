@@ -3,9 +3,26 @@ from __future__ import annotations
 
 import csv
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+
+
+@dataclass(frozen=True)
+class ResolvedRolloutSnapshot:
+    """File paths for one MPPI rollout dump (per-step folder or flat analysis prefix)."""
+
+    step_dir: Path
+    analysis_base: Path | None
+    meta_path: Path
+    costs_path: Path
+    rollouts_path: Path
+    combined_path: Path
+    controls_path: Path | None
+    centerline_path: Path | None
+    rollout_root: Path | None
+    log_csv: Path | None
 
 
 def load_meta(path: Path) -> dict[str, float]:
@@ -296,6 +313,127 @@ def resolve_step_prefix(log_or_rollout_dir: Path, step: int) -> Path:
             if s == step:
                 return Path(prefix)
     return rollout_root / f"step_{step:06d}"
+
+
+def is_flat_analysis_prefix(path: Path) -> bool:
+    """True when *path* names a single-iteration dump (``prefix_meta.csv``, etc.)."""
+    base = path.with_suffix("") if path.suffix == ".csv" else path
+    return Path(str(base) + "_meta.csv").is_file()
+
+
+def _analysis_file_paths(base: Path) -> tuple[Path, Path, Path, Path, Path | None]:
+    controls = Path(str(base) + "_rollouts_controls.csv")
+    return (
+        Path(str(base) + "_meta.csv"),
+        Path(str(base) + "_costs.csv"),
+        Path(str(base) + "_rollouts_xy.csv"),
+        Path(str(base) + "_combined.csv"),
+        controls if controls.is_file() else None,
+    )
+
+
+def resolve_centerline_for_snapshot(
+    step_dir: Path,
+    analysis_base: Path | None = None,
+    log_csv: Path | None = None,
+) -> Path | None:
+    candidates: list[Path] = []
+    if analysis_base is not None:
+        candidates.append(analysis_base.with_name(analysis_base.name + "_centerline.csv"))
+    if log_csv is not None:
+        candidates.append(log_csv.with_name(log_csv.stem + "_centerline.csv"))
+    if step_dir.name.startswith("step_") and step_dir.parent.name.endswith("_rollouts"):
+        stem = step_dir.parent.name[: -len("_rollouts")]
+        candidates.append(step_dir.parent.parent / f"{stem}_centerline.csv")
+    if "_rollouts" in step_dir.as_posix():
+        candidates.append(Path(str(step_dir).rsplit("_rollouts", 1)[0] + "_centerline.csv"))
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def resolve_rollout_snapshot(path: Path, step: int = 0) -> ResolvedRolloutSnapshot:
+    """Resolve rollout CSV paths from any supported input.
+
+    Accepts:
+      - flat analysis prefix (``dubins_circle_mppi_rollout_analysis``)
+      - closed-loop temporal log (``*_log.csv``) + *step*
+      - rollouts root (``*_log_rollouts/``) + *step*
+      - per-step directory (``.../step_000042/``)
+    """
+    path = Path(path)
+    log_csv: Path | None = None
+    analysis_base: Path | None = None
+
+    if path.is_dir() and (path / "costs.csv").is_file():
+        step_dir = path.resolve()
+    elif path.is_dir() and path.name.startswith("step_"):
+        step_dir = path.resolve()
+    elif is_flat_analysis_prefix(path):
+        analysis_base = path.with_suffix("") if path.suffix == ".csv" else path
+        step_dir = analysis_base.resolve()
+    elif path.suffix == ".csv":
+        log_csv = path.resolve()
+        step_dir = resolve_step_prefix(path, step).resolve()
+    elif path.is_dir():
+        step_dir = resolve_step_prefix(path, step).resolve()
+    else:
+        step_dir = resolve_step_prefix(path, step).resolve()
+
+    if analysis_base is None and is_flat_analysis_prefix(step_dir):
+        analysis_base = step_dir
+
+    rollout_root: Path | None = None
+    if analysis_base is not None:
+        meta_path, costs_path, rollouts_path, combined_path, controls_path = _analysis_file_paths(analysis_base)
+    else:
+        meta_path = step_dir / "meta.csv"
+        costs_path = step_dir / "costs.csv"
+        rollouts_path = step_dir / "rollouts_xy.csv"
+        combined_path = step_dir / "combined.csv"
+        controls_path = step_dir / "rollouts_controls.csv"
+        if not controls_path.is_file():
+            controls_path = None
+        if step_dir.name.startswith("step_"):
+            rollout_root = step_dir.parent.resolve()
+
+    centerline_path = resolve_centerline_for_snapshot(step_dir, analysis_base, log_csv)
+
+    return ResolvedRolloutSnapshot(
+        step_dir=step_dir,
+        analysis_base=analysis_base,
+        meta_path=meta_path,
+        costs_path=costs_path,
+        rollouts_path=rollouts_path,
+        combined_path=combined_path,
+        controls_path=controls_path,
+        centerline_path=centerline_path,
+        rollout_root=rollout_root,
+        log_csv=log_csv,
+    )
+
+
+def list_rollout_steps(rollout_root: Path) -> list[tuple[int, float, Path]]:
+    """Return (step, sim_time, directory) for every dumped step under *rollout_root*."""
+    index_path = rollout_root / "steps_index.csv"
+    if index_path.is_file():
+        return [
+            (step, sim_time, Path(prefix).resolve())
+            for step, sim_time, prefix in load_steps_index(index_path)
+        ]
+    steps: list[tuple[int, float, Path]] = []
+    for step_dir in sorted(rollout_root.glob("step_*")):
+        if not step_dir.is_dir() or not (step_dir / "costs.csv").is_file():
+            continue
+        step_num = int(step_dir.name.split("_", 1)[1])
+        sim_time = float("nan")
+        meta_path = step_dir / "meta.csv"
+        if meta_path.is_file():
+            meta = load_meta(meta_path)
+            sim_time = float(meta.get("sim_time", step_num * meta.get("dt", 0.1)))
+        steps.append((step_num, sim_time, step_dir.resolve()))
+    return steps
 
 
 def weights_for_rollout_ids(costs: dict[str, np.ndarray], seg_ids: np.ndarray) -> np.ndarray:

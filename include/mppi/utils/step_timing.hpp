@@ -96,6 +96,7 @@ public:
   {
     total_ms_.reserve(num_steps);
     mppi_ms_.reserve(num_steps);
+    dump_ms_.reserve(num_steps);
     viz_ms_.reserve(num_steps);
     post_ms_.reserve(num_steps);
   }
@@ -110,6 +111,11 @@ public:
     mppi_end_ = SteadyClock::now();
   }
 
+  void endDump()
+  {
+    dump_end_ = SteadyClock::now();
+  }
+
   void endViz()
   {
     viz_end_ = SteadyClock::now();
@@ -120,7 +126,8 @@ public:
   {
     const TimePoint step_end = SteadyClock::now();
     mppi_ms_.push_back(elapsedMs(step_start_, mppi_end_));
-    viz_ms_.push_back(elapsedMs(mppi_end_, viz_end_));
+    dump_ms_.push_back(elapsedMs(mppi_end_, dump_end_));
+    viz_ms_.push_back(elapsedMs(dump_end_, viz_end_));
     post_ms_.push_back(elapsedMs(viz_end_, step_end));
     total_ms_.push_back(elapsedMs(step_start_, step_end));
   }
@@ -129,7 +136,8 @@ public:
   void endStepEarlyExit()
   {
     mppi_ms_.push_back(elapsedMs(step_start_, mppi_end_));
-    viz_ms_.push_back(elapsedMs(mppi_end_, viz_end_));
+    dump_ms_.push_back(elapsedMs(mppi_end_, dump_end_));
+    viz_ms_.push_back(elapsedMs(dump_end_, viz_end_));
     post_ms_.push_back(0.0);
     total_ms_.push_back(elapsedMs(step_start_, viz_end_));
   }
@@ -139,6 +147,7 @@ public:
     std::cout << "\n--- " << title << " ---\n";
     printTimingStats("Total step", summarizeTimingsMs(total_ms_));
     printTimingStats("  MPPI (ref + computeControl + sampled traj)", summarizeTimingsMs(mppi_ms_));
+    printTimingStats("  Rollout dump (prepare + enqueue)", summarizeTimingsMs(dump_ms_));
     printTimingStats("  Viz (draw + video + imshow)", summarizeTimingsMs(viz_ms_));
     printTimingStats("  Post (integrate + log)", summarizeTimingsMs(post_ms_));
     std::cout << std::defaultfloat;
@@ -147,10 +156,12 @@ public:
 private:
   std::vector<double> total_ms_;
   std::vector<double> mppi_ms_;
+  std::vector<double> dump_ms_;
   std::vector<double> viz_ms_;
   std::vector<double> post_ms_;
   TimePoint step_start_{};
   TimePoint mppi_end_{};
+  TimePoint dump_end_{};
   TimePoint viz_end_{};
 };
 

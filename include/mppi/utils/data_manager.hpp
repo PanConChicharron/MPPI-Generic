@@ -19,13 +19,18 @@
 #include <sys/stat.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
+#include <condition_variable>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <mutex>
 #include <numeric>
+#include <queue>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -178,27 +183,42 @@ inline void selectTopRolloutsByWeight(RolloutWeightBundle& bundle, int top_n)
 template <class DYN_T, class SAMPLER_T>
 void copySamplerControlsToHost(SAMPLER_T& sampler, int horizon, int num_rollouts, std::vector<float>& host_controls)
 {
-  host_controls.assign(static_cast<size_t>(num_rollouts) * static_cast<size_t>(horizon) *
-                           static_cast<size_t>(DYN_T::CONTROL_DIM),
-                       0.0F);
-  float* device_controls = sampler.getControlSample(0, 0, 0);
-  HANDLE_ERROR(cudaMemcpy(host_controls.data(), device_controls, host_controls.size() * sizeof(float),
-                          cudaMemcpyDeviceToHost));
+  std::vector<int> all(static_cast<size_t>(num_rollouts));
+  std::iota(all.begin(), all.end(), 0);
+  copySamplerControlsToHost<DYN_T>(sampler, horizon, all, host_controls);
 }
 
-template <class DYN_T, class SAMPLER_T, class OutputTrajT>
-void hostReplayRollouts(DYN_T& model, SAMPLER_T& sampler, const typename DYN_T::state_array& x0, int horizon, float dt,
-                        int num_rollouts, const std::vector<int>& rollout_indices, std::vector<OutputTrajT>& outputs,
-                        std::vector<float>* host_controls_out = nullptr)
+template <class DYN_T, class SAMPLER_T>
+void copySamplerControlsToHost(SAMPLER_T& sampler, int horizon, const std::vector<int>& rollout_indices,
+                               std::vector<float>& host_controls)
 {
   const int k = static_cast<int>(rollout_indices.size());
-  outputs.assign(static_cast<size_t>(k), OutputTrajT::Zero());
-
-  std::vector<float> host_controls;
-  copySamplerControlsToHost<DYN_T>(sampler, horizon, num_rollouts, host_controls);
-  if (host_controls_out != nullptr)
+  const size_t rollout_stride =
+      static_cast<size_t>(horizon) * static_cast<size_t>(DYN_T::CONTROL_DIM) * sizeof(float);
+  host_controls.assign(static_cast<size_t>(k) * static_cast<size_t>(horizon) *
+                           static_cast<size_t>(DYN_T::CONTROL_DIM),
+                       0.0F);
+  for (int out_idx = 0; out_idx < k; ++out_idx)
   {
-    *host_controls_out = host_controls;
+    const int rollout = rollout_indices[static_cast<size_t>(out_idx)];
+    float* device_controls = sampler.getControlSample(rollout, 0, 0);
+    HANDLE_ERROR(cudaMemcpy(host_controls.data() + static_cast<size_t>(out_idx) * static_cast<size_t>(horizon) *
+                                               static_cast<size_t>(DYN_T::CONTROL_DIM),
+                            device_controls, rollout_stride, cudaMemcpyDeviceToHost));
+  }
+}
+
+template <class DYN_T, class OutputTrajT>
+void hostReplayRolloutsFromControls(DYN_T& model, const typename DYN_T::state_array& x0, int horizon, float dt,
+                                    const std::vector<int>& rollout_indices, const std::vector<float>& host_controls,
+                                    std::vector<OutputTrajT>& outputs)
+{
+  const int k = static_cast<int>(rollout_indices.size());
+  outputs.resize(static_cast<size_t>(k));
+  for (OutputTrajT& traj : outputs)
+  {
+    traj.resize(DYN_T::OUTPUT_DIM, horizon);
+    traj.setZero();
   }
 
   typename DYN_T::state_array x_local;
@@ -209,12 +229,11 @@ void hostReplayRollouts(DYN_T& model, SAMPLER_T& sampler, const typename DYN_T::
 
   for (int out_idx = 0; out_idx < k; ++out_idx)
   {
-    const int rollout = rollout_indices[static_cast<size_t>(out_idx)];
     x_local = x0;
     for (int t = 0; t < horizon; ++t)
     {
       const float* src = host_controls.data() +
-                       (static_cast<size_t>(rollout) * static_cast<size_t>(horizon) + static_cast<size_t>(t)) *
+                       (static_cast<size_t>(out_idx) * static_cast<size_t>(horizon) + static_cast<size_t>(t)) *
                            static_cast<size_t>(DYN_T::CONTROL_DIM);
       for (int d = 0; d < DYN_T::CONTROL_DIM; ++d)
       {
@@ -225,6 +244,20 @@ void hostReplayRollouts(DYN_T& model, SAMPLER_T& sampler, const typename DYN_T::
       outputs[static_cast<size_t>(out_idx)].col(t) = y_t;
       x_local = x_next;
     }
+  }
+}
+
+template <class DYN_T, class SAMPLER_T, class OutputTrajT>
+void hostReplayRollouts(DYN_T& model, SAMPLER_T& sampler, const typename DYN_T::state_array& x0, int horizon, float dt,
+                        int num_rollouts, const std::vector<int>& rollout_indices, std::vector<OutputTrajT>& outputs,
+                        std::vector<float>* host_controls_out = nullptr)
+{
+  std::vector<float> host_controls;
+  copySamplerControlsToHost<DYN_T>(sampler, horizon, rollout_indices, host_controls);
+  hostReplayRolloutsFromControls<DYN_T, OutputTrajT>(model, x0, horizon, dt, rollout_indices, host_controls, outputs);
+  if (host_controls_out != nullptr)
+  {
+    *host_controls_out = std::move(host_controls);
   }
 }
 
@@ -246,6 +279,31 @@ template <class DYN_T>
 class MppiDataManager
 {
 public:
+  using state_array = typename DYN_T::state_array;
+  using dyn_params_t = typename DYN_T::DYN_PARAMS_T;
+  using control_trajectory_t = Eigen::Matrix<float, DYN_T::CONTROL_DIM, Eigen::Dynamic>;
+  using output_trajectory_t = Eigen::Matrix<float, DYN_T::OUTPUT_DIM, Eigen::Dynamic>;
+
+  MppiDataManager() = default;
+
+  ~MppiDataManager()
+  {
+    close();
+  }
+
+  MppiDataManager(const MppiDataManager&) = delete;
+  MppiDataManager& operator=(const MppiDataManager&) = delete;
+
+  void setAsyncRolloutDumps(const bool enabled)
+  {
+    async_rollout_dumps_ = enabled;
+  }
+
+  bool asyncRolloutDumps() const
+  {
+    return async_rollout_dumps_;
+  }
+
   bool beginRun(const std::string& log_csv_path, const mppi::path::Path2D& path,
                 PathTrackingLogSchema schema = PathTrackingLogSchema::kRefVPoseTarget)
   {
@@ -279,6 +337,11 @@ public:
     }
     writeTemporalHeader();
     temporal_log_ << std::scientific;
+
+    if (async_rollout_dumps_)
+    {
+      startDumpWorker();
+    }
     return true;
   }
 
@@ -317,45 +380,43 @@ public:
   }
 
   template <class CTRL_T, class SAMPLER_T, class ControlTrajT>
-  void dumpRolloutSnapshot(int step, float sim_time, const typename DYN_T::state_array& x, CTRL_T& controller,
-                           DYN_T& model, SAMPLER_T& sampler, int horizon, float lambda, float dt,
-                           const ControlTrajT& u_opt, const RolloutOutputIndices& out_idx,
-                           int top_n = kDefaultTopRollouts)
+  void dumpRolloutSnapshot(int step, float sim_time, const state_array& x, CTRL_T& controller, DYN_T& model,
+                           SAMPLER_T& sampler, int horizon, float lambda, float dt, const ControlTrajT& u_opt,
+                           const RolloutOutputIndices& out_idx, int top_n = kDefaultTopRollouts)
   {
-    using OutputTrajT = typename CTRL_T::output_trajectory;
-    RolloutWeightBundle weights;
-    extractWeightsFromController(controller, lambda, weights);
+    RolloutSnapshotJob job =
+        prepareRolloutSnapshot(step, sim_time, x, controller, model, sampler, horizon, lambda, dt, u_opt, out_idx, top_n);
+    if (job.valid)
+    {
+      if (async_rollout_dumps_)
+      {
+        enqueueRolloutSnapshot(std::move(job));
+      }
+      else
+      {
+        writeRolloutSnapshotJob(job);
+      }
+    }
+  }
 
-    const std::string step_dir = rollout_dir_ + "/" + stepDirectoryName(step);
-    if (!ensureDirectory(step_dir))
+  /** Block until all queued rollout snapshot writes finish. */
+  void waitForRolloutDumps()
+  {
+    if (!dump_worker_running_)
     {
       return;
     }
+    std::unique_lock<std::mutex> lock(dump_mutex_);
+    dump_cv_.wait(lock, [this]() { return dump_queue_.empty() && dump_jobs_in_flight_ == 0; });
+  }
 
-    const int num_rollouts = static_cast<int>(controller.getSampledCostSeq().size());
-    rollout_csv::writeMeta<DYN_T>(step_dir + "/meta.csv", x, dt, lambda, horizon, num_rollouts, num_rollouts,
-                                  weights.baseline, weights.normalizer, step, sim_time, boundary_left_,
-                                  boundary_right_);
-    rollout_csv::writeCosts(step_dir + "/costs.csv", weights.raw_costs, weights.unnormalized_importance,
-                            weights.normalized_weights);
-    rollout_csv::writeCombinedTrajectory<DYN_T>(model, x, u_opt, step_dir + "/combined.csv", dt);
-
-    RolloutWeightBundle top_weights = weights;
-    selectTopRolloutsByWeight(top_weights, top_n);
-    std::vector<OutputTrajT> top_outputs;
-    std::vector<float> host_controls;
-    hostReplayRollouts<DYN_T, SAMPLER_T, OutputTrajT>(model, sampler, x, horizon, dt, num_rollouts,
-                                                    top_weights.rollout_indices, top_outputs, &host_controls);
-    rollout_csv::writeRolloutTrajectories<DYN_T, OutputTrajT>(step_dir + "/rollouts_xy.csv", x, horizon, top_outputs,
-                                                              top_weights.rollout_indices, out_idx.x, out_idx.y,
-                                                              out_idx.yaw, out_idx.vel);
-    rollout_csv::writeRolloutControls<DYN_T>(step_dir + "/rollouts_controls.csv", host_controls, horizon, num_rollouts,
-                                             top_weights.rollout_indices);
-
-    std::ofstream idx(rollout_index_path_.c_str(), std::ios::app);
-    if (idx)
+  void close()
+  {
+    waitForRolloutDumps();
+    stopDumpWorker();
+    if (temporal_log_.is_open())
     {
-      idx << step << "," << sim_time << "," << step_dir << "\n";
+      temporal_log_.close();
     }
   }
 
@@ -433,24 +494,169 @@ public:
                                              num_rollouts, top.rollout_indices);
   }
 
-  void close()
+  const std::string& rolloutDirectory() const
   {
-    if (temporal_log_.is_open())
-    {
-      temporal_log_.close();
-    }
+    return rollout_dir_;
+  }
+
+  size_t pendingRolloutDumpJobs() const
+  {
+    std::lock_guard<std::mutex> lock(dump_mutex_);
+    return dump_queue_.size() + static_cast<size_t>(dump_jobs_in_flight_);
   }
 
   const std::string& logPath() const
   {
     return log_path_;
   }
-  const std::string& rolloutDirectory() const
-  {
-    return rollout_dir_;
-  }
 
 private:
+  struct RolloutSnapshotJob
+  {
+    bool valid = false;
+    int step = 0;
+    float sim_time = 0.0F;
+    int horizon = 0;
+    float dt = 0.0F;
+    float lambda = 0.0F;
+    int num_rollouts = 0;
+    RolloutOutputIndices out_idx{};
+    state_array x = state_array::Zero();
+    dyn_params_t dyn_params{};
+    control_trajectory_t u_opt;
+    RolloutWeightBundle weights;
+    RolloutWeightBundle top_weights;
+    std::vector<float> host_controls;
+    std::string step_dir;
+  };
+
+  template <class CTRL_T, class SAMPLER_T, class ControlTrajT>
+  RolloutSnapshotJob prepareRolloutSnapshot(int step, float sim_time, const state_array& x, CTRL_T& controller,
+                                            DYN_T& model, SAMPLER_T& sampler, int horizon, float lambda, float dt,
+                                            const ControlTrajT& u_opt, const RolloutOutputIndices& out_idx, int top_n)
+  {
+    RolloutSnapshotJob job;
+    extractWeightsFromController(controller, lambda, job.weights);
+
+    job.step_dir = rollout_dir_ + "/" + stepDirectoryName(step);
+    if (!ensureDirectory(job.step_dir))
+    {
+      return job;
+    }
+
+    job.valid = true;
+    job.step = step;
+    job.sim_time = sim_time;
+    job.horizon = horizon;
+    job.dt = dt;
+    job.lambda = lambda;
+    job.num_rollouts = static_cast<int>(controller.getSampledCostSeq().size());
+    job.out_idx = out_idx;
+    job.x = x;
+    job.dyn_params = model.getParams();
+    job.u_opt = u_opt;
+
+    job.top_weights = job.weights;
+    selectTopRolloutsByWeight(job.top_weights, top_n);
+    copySamplerControlsToHost<DYN_T>(sampler, horizon, job.top_weights.rollout_indices, job.host_controls);
+    return job;
+  }
+
+  void writeRolloutSnapshotJob(const RolloutSnapshotJob& job)
+  {
+    DYN_T model;
+    model.setParams(job.dyn_params);
+
+    rollout_csv::writeMeta<DYN_T>(job.step_dir + "/meta.csv", job.x, job.dt, job.lambda, job.horizon, job.num_rollouts,
+                                  job.num_rollouts, job.weights.baseline, job.weights.normalizer, job.step,
+                                  job.sim_time, boundary_left_, boundary_right_);
+    rollout_csv::writeCosts(job.step_dir + "/costs.csv", job.weights.raw_costs, job.weights.unnormalized_importance,
+                            job.weights.normalized_weights);
+    rollout_csv::writeCombinedTrajectory<DYN_T>(model, job.x, job.u_opt, job.step_dir + "/combined.csv", job.dt);
+
+    std::vector<output_trajectory_t> top_outputs;
+    hostReplayRolloutsFromControls<DYN_T, output_trajectory_t>(model, job.x, job.horizon, job.dt,
+                                                               job.top_weights.rollout_indices, job.host_controls,
+                                                               top_outputs);
+    rollout_csv::writeRolloutTrajectories<DYN_T, output_trajectory_t>(
+        job.step_dir + "/rollouts_xy.csv", job.x, job.horizon, top_outputs, job.top_weights.rollout_indices,
+        job.out_idx.x, job.out_idx.y, job.out_idx.yaw, job.out_idx.vel);
+    rollout_csv::writeRolloutControls<DYN_T>(job.step_dir + "/rollouts_controls.csv", job.host_controls, job.horizon,
+                                             job.num_rollouts, job.top_weights.rollout_indices);
+
+    std::lock_guard<std::mutex> lock(dump_mutex_);
+    std::ofstream idx(rollout_index_path_.c_str(), std::ios::app);
+    if (idx)
+    {
+      idx << job.step << "," << job.sim_time << "," << job.step_dir << "\n";
+    }
+  }
+
+  void enqueueRolloutSnapshot(RolloutSnapshotJob job)
+  {
+    {
+      std::lock_guard<std::mutex> lock(dump_mutex_);
+      dump_queue_.push(std::move(job));
+    }
+    dump_cv_.notify_one();
+  }
+
+  void startDumpWorker()
+  {
+    if (dump_worker_running_)
+    {
+      return;
+    }
+    dump_shutdown_ = false;
+    dump_worker_running_ = true;
+    dump_thread_ = std::thread([this]() { dumpWorkerLoop(); });
+  }
+
+  void stopDumpWorker()
+  {
+    if (!dump_worker_running_)
+    {
+      return;
+    }
+    {
+      std::lock_guard<std::mutex> lock(dump_mutex_);
+      dump_shutdown_ = true;
+    }
+    dump_cv_.notify_all();
+    if (dump_thread_.joinable())
+    {
+      dump_thread_.join();
+    }
+    dump_worker_running_ = false;
+  }
+
+  void dumpWorkerLoop()
+  {
+    while (true)
+    {
+      RolloutSnapshotJob job;
+      {
+        std::unique_lock<std::mutex> lock(dump_mutex_);
+        dump_cv_.wait(lock, [this]() { return dump_shutdown_ || !dump_queue_.empty(); });
+        if (dump_shutdown_ && dump_queue_.empty())
+        {
+          break;
+        }
+        job = std::move(dump_queue_.front());
+        dump_queue_.pop();
+        ++dump_jobs_in_flight_;
+      }
+
+      writeRolloutSnapshotJob(job);
+
+      {
+        std::lock_guard<std::mutex> lock(dump_mutex_);
+        --dump_jobs_in_flight_;
+      }
+      dump_cv_.notify_all();
+    }
+  }
+
   void writeTemporalHeader()
   {
     temporal_log_ << "t,pos_x,pos_y,yaw,vel_x,steer_angle,brake_state,u_accel,u_steer,nom_u_accel,nom_u_steer,"
@@ -473,7 +679,16 @@ private:
   PathTrackingLogSchema schema_ = PathTrackingLogSchema::kRefVPoseTarget;
   float boundary_left_ = -1.0F;
   float boundary_right_ = -1.0F;
+  bool async_rollout_dumps_ = true;
   std::ofstream temporal_log_;
+
+  std::thread dump_thread_;
+  mutable std::mutex dump_mutex_;
+  std::condition_variable dump_cv_;
+  std::queue<RolloutSnapshotJob> dump_queue_;
+  bool dump_shutdown_ = false;
+  bool dump_worker_running_ = false;
+  int dump_jobs_in_flight_ = 0;
 };
 
 }  // namespace data

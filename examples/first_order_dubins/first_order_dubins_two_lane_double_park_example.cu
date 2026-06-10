@@ -239,6 +239,7 @@ int main(int argc, char** argv)
 
     data_mgr.dumpRolloutSnapshot(k, sim_time, x, controller, model, sampler, kMppiHorizon, kLambda, kDt, u_opt_traj,
                                  kRolloutOutIdx);
+    step_timing.endDump();
 
     const auto state_trajectory = controller.getActualStateSeq();
     const auto sampled_trajectories = controller.getSampledOutputTrajectories();

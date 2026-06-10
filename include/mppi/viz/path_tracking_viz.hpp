@@ -267,11 +267,14 @@ inline void drawTrajectory(cv::Mat& img, const TrajectoryMatrix& traj, const int
   cv::addWeighted(overlay, overlay_alpha, img, 1.0F - overlay_alpha, 0, img);
 }
 
+/** Default cap on rollouts drawn live; full samples remain in MPPI / CSV dumps. */
+constexpr int kDefaultMaxDrawRollouts = 400;
+
 template <typename TrajectoryMatrix>
 inline void drawSampledTrajectories(cv::Mat& img, const std::vector<TrajectoryMatrix>& sampled_trajectories,
                                     const int x_idx, const int y_idx, const int num_timesteps,
                                     const std::vector<float>& rollout_costs, const int thickness = 1,
-                                    const float scale = 15.0F)
+                                    const float scale = 15.0F, const int max_rollouts = kDefaultMaxDrawRollouts)
 {
   if (sampled_trajectories.empty() || num_timesteps <= 1 ||
       rollout_costs.size() != sampled_trajectories.size())
@@ -280,11 +283,26 @@ inline void drawSampledTrajectories(cv::Mat& img, const std::vector<TrajectoryMa
   }
 
   const int num_valid_cols = num_timesteps - 1;
-  const float min_cost = *std::min_element(rollout_costs.begin(), rollout_costs.end());
-  const float max_cost = *std::max_element(rollout_costs.begin(), rollout_costs.end());
 
   std::vector<size_t> draw_order(sampled_trajectories.size());
   std::iota(draw_order.begin(), draw_order.end(), 0U);
+  if (max_rollouts > 0 && static_cast<int>(draw_order.size()) > max_rollouts)
+  {
+    std::partial_sort(draw_order.begin(), draw_order.begin() + static_cast<size_t>(max_rollouts), draw_order.end(),
+                      [&rollout_costs](const size_t a, const size_t b) {
+                        return rollout_costs[a] < rollout_costs[b];
+                      });
+    draw_order.resize(static_cast<size_t>(max_rollouts));
+  }
+
+  float min_cost = rollout_costs[draw_order.front()];
+  float max_cost = rollout_costs[draw_order.front()];
+  for (const size_t idx : draw_order)
+  {
+    min_cost = std::min(min_cost, rollout_costs[idx]);
+    max_cost = std::max(max_cost, rollout_costs[idx]);
+  }
+
   std::sort(draw_order.begin(), draw_order.end(),
             [&rollout_costs](const size_t a, const size_t b) { return rollout_costs[a] > rollout_costs[b]; });
 

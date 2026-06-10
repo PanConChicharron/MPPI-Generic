@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
 """Visualize the top MPPI rollouts at a chosen simulation step (purple=low, green=high weight).
 
+Works with both dump formats:
+  - Single-iteration analysis (``*_mppi_rollout_analysis_example``)
+  - Closed-loop per-step snapshots (``*_two_lane_double_park_example``, etc.)
+
+For temporal plots over the **entire run**, use ``plot_racer_dubins_temporal_mppi.py``.
+
 Usage:
   python3 scripts/mppi/plot_mppi_rollouts_at_step.py first_order_dubins_two_lane_double_park_log.csv --step 42
-  python3 scripts/mppi/plot_mppi_rollouts_at_step.py dubins_stadium_mppi_rollout_analysis --step 0
+  python3 scripts/mppi/plot_mppi_rollouts_at_step.py dubins_stadium_mppi_rollout_analysis
   python3 scripts/mppi/plot_mppi_rollouts_at_step.py first_order_dubins_two_lane_double_park_log_rollouts/step_000042
 """
 from __future__ import annotations
@@ -24,7 +30,7 @@ from mppi_plot_utils import (
     load_meta,
     load_rollout_segments,
     enable_scroll_zoom,
-    resolve_step_prefix,
+    resolve_rollout_snapshot,
     sort_rollouts_for_draw,
     weight_to_purple_green,
     weight_to_rollout_linewidths,
@@ -40,30 +46,20 @@ def display_available() -> bool:
 
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("path", type=Path, help="Temporal log CSV, rollouts directory, or analysis prefix")
-    p.add_argument("--step", type=int, default=0, help="Simulation step to visualize")
+    p.add_argument(
+        "path",
+        type=Path,
+        help="Analysis prefix, temporal log CSV, rollouts directory, or step_*/ folder",
+    )
+    p.add_argument("--step", type=int, default=0, help="Simulation step (closed-loop logs only)")
     p.add_argument("-o", "--output", type=Path, default=None)
     p.add_argument("--no-show", action="store_true")
     p.add_argument("--show", action="store_true")
     p.add_argument("--zoom-pad", type=float, default=2.0)
     args = p.parse_args()
 
-    if args.path.is_dir() and args.path.name.startswith("step_"):
-        step_dir = args.path
-    elif args.path.is_dir():
-        step_dir = resolve_step_prefix(args.path, args.step)
-    elif args.path.suffix == ".csv":
-        step_dir = resolve_step_prefix(args.path, args.step)
-    else:
-        base = args.path if args.path.suffix == "" else args.path.with_suffix("")
-        step_dir = Path(str(base)) if args.step == 0 else resolve_step_prefix(args.path, args.step)
-
-    meta_path = step_dir / "meta.csv"
-    costs_path = step_dir / "costs.csv"
-    rollouts_path = step_dir / "rollouts_xy.csv"
-    combined_path = step_dir / "combined.csv"
-
-    for req in (meta_path, costs_path, rollouts_path, combined_path):
+    snapshot = resolve_rollout_snapshot(args.path, args.step)
+    for req in (snapshot.meta_path, snapshot.costs_path, snapshot.rollouts_path, snapshot.combined_path):
         if not req.is_file():
             print(f"error: missing {req}", file=sys.stderr)
             return 1
@@ -81,28 +77,24 @@ def main() -> int:
         print(e, file=sys.stderr)
         return 1
 
-    meta = load_meta(meta_path)
-    costs = load_costs(costs_path)
-    segments, seg_ids, _ = load_rollout_segments(rollouts_path)
-    combined = load_combined(combined_path)
+    meta = load_meta(snapshot.meta_path)
+    costs = load_costs(snapshot.costs_path)
+    segments, seg_ids, _ = load_rollout_segments(snapshot.rollouts_path)
+    combined = load_combined(snapshot.combined_path)
 
-    centerline_path = step_dir.parent.parent / (step_dir.parent.name.replace("_rollouts", "") + "_centerline.csv")
-    if not centerline_path.is_file():
-        centerline_path = step_dir.parent / "centerline.csv"
-    if not centerline_path.is_file():
-        centerline_path = step_dir.with_name(step_dir.name.replace("step_", "") + "_centerline.csv")
-    cpx, cpy = load_centerline(centerline_path)
-    if cpx is None:
-        alt = Path(str(step_dir).rsplit("_rollouts", 1)[0] + "_centerline.csv")
-        cpx, cpy = load_centerline(alt)
+    if snapshot.centerline_path is not None:
+        cpx, cpy = load_centerline(snapshot.centerline_path)
+    else:
+        cpx, cpy = None, None
 
+    log_hint = snapshot.log_csv or snapshot.analysis_base or snapshot.step_dir
     seg_weights = weights_for_rollout_ids(costs, seg_ids)
     segments, seg_weights = sort_rollouts_for_draw(segments, seg_weights)
     colors = weight_to_purple_green(seg_weights)
 
     fig, ax = plt.subplots(figsize=(11, 9))
     if cpx is not None:
-        left_b, right_b = load_boundary_limits(meta, log_hint=step_dir)
+        left_b, right_b = load_boundary_limits(meta, log_hint=log_hint)
         draw_road_boundaries(ax, cpx, cpy, left_b, right_b)
         ax.plot(cpx, cpy, "r-", linewidth=1.4, label="ref centerline", zorder=2)
 
@@ -121,7 +113,7 @@ def main() -> int:
     ax.set_xlabel("x [m]")
     ax.set_ylabel("y [m]")
     sim_step = int(meta.get("sim_step", args.step))
-    sim_time = meta.get("sim_time", float("nan"))
+    sim_time = float(meta.get("sim_time", sim_step * meta.get("dt", 0.1)))
     ax.set_title(
         f"Top {len(segments)} rollouts @ step {sim_step}  t={sim_time:.2f}s  "
         f"λ={meta.get('lambda', 0):.3g}  color: purple (low) → green (high weight)"
@@ -135,9 +127,9 @@ def main() -> int:
     cbar = fig.colorbar(sm, ax=ax, fraction=0.035, pad=0.02)
     cbar.set_label("normalized weight")
 
-    out_png = args.output if args.output is not None else step_dir / "rollouts_viz.png"
+    out_png = args.output if args.output is not None else snapshot.step_dir / "rollouts_viz.png"
     fig.savefig(out_png, dpi=150, bbox_inches="tight")
-    print(f"Drew {len(segments)} rollouts from {step_dir}")
+    print(f"Drew {len(segments)} rollouts from {snapshot.step_dir}")
     print(f"Wrote {out_png}")
     if want_show:
         enable_scroll_zoom(fig, [ax])

@@ -228,6 +228,7 @@ int main(int argc, char** argv)
 
       data_mgr.dumpRolloutSnapshot(k, sim_time, x, controller, model, sampler, kMppiHorizon, kLambda, kDt, u_opt,
                                    kRolloutOutIdx);
+      step_timing.endDump();
 
       /* Video frame generation */
       const auto state_trajectory = controller.getActualStateSeq();

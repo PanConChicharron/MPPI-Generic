@@ -259,13 +259,13 @@ void writeRolloutControls(const std::string& path, const std::vector<float>& hos
   }
   f << "rollout_index,step,u_accel,u_steer\n";
   const size_t stride = static_cast<size_t>(horizon) * static_cast<size_t>(DYN_T::CONTROL_DIM);
-  for (int rollout_index : rollout_indices)
+  for (size_t out_idx = 0; out_idx < rollout_indices.size(); ++out_idx)
   {
+    const int rollout_index = rollout_indices[out_idx];
     for (int t = 0; t < horizon; ++t)
     {
       const float* src = host_controls.data() +
-                         (static_cast<size_t>(rollout_index) * stride +
-                          static_cast<size_t>(t) * static_cast<size_t>(DYN_T::CONTROL_DIM));
+                         (out_idx * stride + static_cast<size_t>(t) * static_cast<size_t>(DYN_T::CONTROL_DIM));
       f << rollout_index << "," << t << "," << src[0] << "," << src[1] << "\n";
     }
   }
