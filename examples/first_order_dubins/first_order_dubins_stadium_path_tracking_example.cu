@@ -90,6 +90,7 @@ int main(int argc, char** argv)
   {
     return 1;
   }
+  data_mgr.setRoadBoundaryLimits(kRoadHalfWidth, kRoadHalfWidth);
 
   constexpr float kRoadHalfWidth = 0.8F;
   const std::vector<mppi::cost::ParkedCarObstacle> parked_cars =

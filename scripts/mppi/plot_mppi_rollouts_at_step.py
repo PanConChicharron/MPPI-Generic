@@ -19,8 +19,11 @@ from mppi_plot_utils import (
     load_centerline,
     load_combined,
     load_costs,
+    draw_road_boundaries,
+    load_boundary_limits,
     load_meta,
     load_rollout_segments,
+    enable_scroll_zoom,
     resolve_step_prefix,
     sort_rollouts_for_draw,
     weight_to_purple_green,
@@ -99,7 +102,9 @@ def main() -> int:
 
     fig, ax = plt.subplots(figsize=(11, 9))
     if cpx is not None:
-        ax.plot(cpx, cpy, "r-", linewidth=1.4, label="ref centerline", zorder=1)
+        left_b, right_b = load_boundary_limits(meta, log_hint=step_dir)
+        draw_road_boundaries(ax, cpx, cpy, left_b, right_b)
+        ax.plot(cpx, cpy, "r-", linewidth=1.4, label="ref centerline", zorder=2)
 
     lc = LineCollection(segments, colors=colors, linewidths=weight_to_rollout_linewidths(seg_weights), zorder=2)
     ax.add_collection(lc)
@@ -135,6 +140,7 @@ def main() -> int:
     print(f"Drew {len(segments)} rollouts from {step_dir}")
     print(f"Wrote {out_png}")
     if want_show:
+        enable_scroll_zoom(fig, [ax])
         plt.show()
     return 0
 

@@ -18,8 +18,11 @@ from mppi_plot_utils import (
     load_centerline,
     load_combined,
     load_costs,
+    draw_road_boundaries,
+    load_boundary_limits,
     load_meta,
     load_rollout_segments,
+    enable_scroll_zoom,
     sort_rollouts_for_draw,
     weight_to_purple_green,
     weight_to_rollout_linewidths,
@@ -97,7 +100,9 @@ def main() -> int:
 
     ax_xy = fig.add_subplot(gs[0, :])
     if cpx is not None:
-        ax_xy.plot(cpx, cpy, "r-", linewidth=1.5, label="ref centerline", zorder=1)
+        left_b, right_b = load_boundary_limits(meta, log_hint=base)
+        draw_road_boundaries(ax_xy, cpx, cpy, left_b, right_b)
+        ax_xy.plot(cpx, cpy, "r-", linewidth=1.5, label="ref centerline", zorder=2)
 
     lc = LineCollection(segments, colors=seg_colors, linewidths=weight_to_rollout_linewidths(seg_weights), zorder=2)
     ax_xy.add_collection(lc)
@@ -217,6 +222,10 @@ def main() -> int:
     print(f"Drew {n_drawn} rollouts (purple→green by weight, top {args.top_n})")
     print(f"Wrote {out_png}")
     if want_show:
+        zoom_axes = [ax_xy, ax_cost, ax_w, ax_sc, ax_ua, ax_us]
+        if not args.no_inset and cpx is not None and args.zoom_pad >= 0:
+            zoom_axes.append(ax_inset)
+        enable_scroll_zoom(fig, zoom_axes)
         print("Close plot window to exit.")
         plt.show()
     return 0

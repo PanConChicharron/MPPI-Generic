@@ -97,6 +97,7 @@ int main(int argc, char** argv)
   {
     return 1;
   }
+  data_mgr.setRoadBoundaryLimits(kRoadHalfWidth, kRoadHalfWidth);
 
   std::vector<mppi::cost::MovingCarObstacle> cross_traffic = mppi::cost::defaultIntersectionCrossTraffic();
   std::cout << "Cross-traffic vehicles: " << cross_traffic.size() << "\n";

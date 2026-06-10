@@ -79,6 +79,7 @@ int main(int argc, char** argv)
   {
     return 1;
   }
+  data_mgr.setRoadBoundaryLimits(0.8F, 0.8F);
 
   mppi::path::PathReferenceGenerator ref_gen(kDt);
   ref_gen.setSpeedCap(kVMax);

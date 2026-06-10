@@ -101,6 +101,7 @@ int main(int argc, char** argv)
   {
     return 1;
   }
+  data_mgr.setRoadBoundaryLimits(kBoundaryLeft, kBoundaryRight);
 
   std::vector<mppi::cost::MovingCarObstacle> obstacles = mppi::cost::twoLaneDoubleParkAndRearApproach();
   std::cout << "Ego left lane x=" << kLeftLaneX << ", stopped @ (" << obstacles[0].x0 << ", " << obstacles[0].y0
@@ -164,7 +165,7 @@ int main(int argc, char** argv)
   x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::POS_X)) = p0.x;
   x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::POS_Y)) = p0.y;
   x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::YAW)) = p0.yaw;
-  x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::VEL_X)) = kTargetSpeed;
+  x(static_cast<int>(FirstOrderDubinsBicycleParams::StateIndex::VEL_X)) = 0.0;
 
   std::vector<float> obs_traj_x;
   std::vector<float> obs_traj_y;
@@ -175,7 +176,7 @@ int main(int argc, char** argv)
   cv::Mat base_frame = mppi::viz::makeWhiteFrame(1024, 1024);
   mppi::viz::drawStraightCorridor(base_frame, kLeftLaneX, kRoadYStart, kLeftLaneX, kRoadYEnd, kLaneHalfWidth);
   mppi::viz::drawStraightCorridor(base_frame, kRightLaneX, kRoadYStart, kRightLaneX, kRoadYEnd, kLaneHalfWidth);
-  mppi::viz::drawRoadBoundaries(base_frame, path, kLaneHalfWidth);
+  mppi::viz::drawAsymmetricRoadBoundaries(base_frame, path, kBoundaryLeft, kBoundaryRight);
   mppi::viz::drawCenterline(base_frame, path);
 
   const mppi::viz::TimeSeriesPlotLayout& plot_layout = mppi::viz::defaultTimeSeriesPlotLayout();

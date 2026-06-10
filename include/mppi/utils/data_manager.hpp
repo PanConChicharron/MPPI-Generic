@@ -289,6 +289,12 @@ public:
     return true;
   }
 
+  void setRoadBoundaryLimits(float left, float right)
+  {
+    boundary_left_ = left;
+    boundary_right_ = right;
+  }
+
   void logPathTrackingStep(const PathTrackingStepLog& rec)
   {
     if (!temporal_log_)
@@ -328,7 +334,8 @@ public:
 
     const int num_rollouts = static_cast<int>(controller.getSampledCostSeq().size());
     rollout_csv::writeMeta<DYN_T>(step_dir + "/meta.csv", x, dt, lambda, horizon, num_rollouts, num_rollouts,
-                                  weights.baseline, weights.normalizer, step, sim_time);
+                                  weights.baseline, weights.normalizer, step, sim_time, boundary_left_,
+                                  boundary_right_);
     rollout_csv::writeCosts(step_dir + "/costs.csv", weights.raw_costs, weights.unnormalized_importance,
                             weights.normalized_weights);
     rollout_csv::writeCombinedTrajectory<DYN_T>(model, x, u_opt, step_dir + "/combined.csv", dt);
@@ -364,7 +371,7 @@ public:
     const int num_rollouts = static_cast<int>(controller.getSampledCostSeq().size());
 
     rollout_csv::writeMeta<DYN_T>(analysis_prefix_ + "_meta.csv", x, dt, lambda, horizon, num_rollouts, num_rollouts,
-                                  weights.baseline, weights.normalizer);
+                                  weights.baseline, weights.normalizer, -1, -1.0F, boundary_left_, boundary_right_);
     rollout_csv::writeCosts(analysis_prefix_ + "_costs.csv", weights.raw_costs, weights.unnormalized_importance,
                             weights.normalized_weights);
     rollout_csv::writeCombinedTrajectory<DYN_T>(model, x, u_opt, analysis_prefix_ + "_combined.csv", dt);
@@ -402,7 +409,7 @@ public:
     }
 
     rollout_csv::writeMeta<DYN_T>(analysis_prefix_ + "_meta.csv", x, dt, lambda, horizon, num_rollouts, num_rollouts,
-                                  baseline, normalizer);
+                                  baseline, normalizer, -1, -1.0F, boundary_left_, boundary_right_);
     rollout_csv::writeCosts(analysis_prefix_ + "_costs.csv", raw_costs, unnormalized_importance, normalized_weights);
     rollout_csv::writeCombinedTrajectory<DYN_T>(model, x, u_opt, analysis_prefix_ + "_combined.csv", dt);
 
@@ -464,6 +471,8 @@ private:
   std::string rollout_index_path_;
   std::string analysis_prefix_;
   PathTrackingLogSchema schema_ = PathTrackingLogSchema::kRefVPoseTarget;
+  float boundary_left_ = -1.0F;
+  float boundary_right_ = -1.0F;
   std::ofstream temporal_log_;
 };
 

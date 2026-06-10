@@ -7,7 +7,8 @@ path (black line) and weighted control sequence (black lines) are recomputed
 from the same weights — they update with lambda without re-running MPPI.
 
 Use Prev/Next (or ←/→) to move between dumped simulation steps when a rollout
-log with multiple steps is loaded.
+log with multiple steps is loaded. Scroll to zoom, click-drag to pan, and press
+r to reset the rollout map view.
 
 Usage:
   python3 scripts/mppi/plot_mppi_lambda_retune.py first_order_dubins_two_lane_double_park_log.csv --step 42
@@ -29,10 +30,13 @@ from mppi_plot_utils import (
     load_centerline,
     load_combined,
     load_costs,
+    draw_road_boundaries,
+    load_boundary_limits,
     load_meta,
     load_rollout_controls,
     load_rollout_trajectories,
     load_steps_index,
+    enable_scroll_zoom,
     recompute_weights,
     resolve_step_prefix,
     sort_rollouts_for_draw,
@@ -293,14 +297,19 @@ def main() -> int:
     max_rollouts = max(len(step_data.trajectories), 1)
     init_top_n = min(max(args.top_n, 1), max_rollouts)
 
-    fig = plt.figure(figsize=(14, 13))
-    fig.subplots_adjust(bottom=0.11)
+    fig = plt.figure(figsize=(20, 12))
+    fig.subplots_adjust(bottom=0.11, left=0.05, right=0.98, top=0.96)
     gs = fig.add_gridspec(
-        4, 2, height_ratios=[1.6, 1.0, 0.65, 0.65], width_ratios=[1.2, 1.0], hspace=0.38, wspace=0.25
+        4,
+        6,
+        height_ratios=[2.8, 0.95, 0.6, 0.6],
+        width_ratios=[1.0, 1.0, 1.0, 0.55, 0.55, 0.55],
+        hspace=0.38,
+        wspace=0.28,
     )
-    ax_xy = fig.add_subplot(gs[0, :])
-    ax_hist = fig.add_subplot(gs[1, 0])
-    ax_sc = fig.add_subplot(gs[1, 1])
+    ax_xy = fig.add_subplot(gs[0:2, 0:4])
+    ax_hist = fig.add_subplot(gs[0, 4:6])
+    ax_sc = fig.add_subplot(gs[1, 4:6])
     ax_ua = fig.add_subplot(gs[2, :])
     ax_us = fig.add_subplot(gs[3, :], sharex=ax_ua)
 
@@ -313,7 +322,9 @@ def main() -> int:
     ax_slider_n = fig.add_axes([0.15, 0.025, 0.7, 0.022])
 
     if cpx is not None:
-        ax_xy.plot(cpx, cpy, "r-", linewidth=1.2, zorder=1)
+        left_b, right_b = load_boundary_limits(step_data.meta, log_hint=args.path)
+        draw_road_boundaries(ax_xy, cpx, cpy, left_b, right_b)
+        ax_xy.plot(cpx, cpy, "r-", linewidth=1.2, zorder=1, label="ref centerline")
     lc = LineCollection([], linewidths=0.7, zorder=2)
     ax_xy.add_collection(lc)
     combined_line, = ax_xy.plot([], [], "k-", linewidth=2.2, zorder=5, label="weighted mean path")
@@ -353,7 +364,16 @@ def main() -> int:
     btn_prev = Button(ax_btn_prev, "Prev") if multi_step else None
     btn_next = Button(ax_btn_next, "Next") if multi_step else None
 
-    state: dict[str, object] = {"data": step_data, "step_idx": step_idx}
+    state: dict[str, object] = {"data": step_data, "step_idx": step_idx, "user_zoomed": False}
+
+    def mark_user_zoom(_ax) -> None:
+        state["user_zoomed"] = True
+
+    enable_scroll_zoom(
+        fig,
+        [ax_xy, ax_hist, ax_sc, ax_ua, ax_us],
+        on_user_zoom=mark_user_zoom,
+    )
 
     def refresh_nav_buttons() -> None:
         if not multi_step or btn_prev is None or btn_next is None:
@@ -395,6 +415,7 @@ def main() -> int:
         data = load_step_data(entry.directory, analysis_base=None)
         state["data"] = data
         state["step_idx"] = index
+        state["user_zoomed"] = False
         update_top_n_slider(data)
         set_combined_reference(data)
         update_control_title(data)
@@ -461,7 +482,7 @@ def main() -> int:
         ax_sc.set_title("Cost vs weight")
         ax_sc.grid(True, alpha=0.3)
 
-        if wx.size and wy.size:
+        if wx.size and wy.size and not state["user_zoomed"]:
             all_xy = np.vstack(visible_segments + [np.column_stack([wx, wy])])
             pad = 0.05 * max(
                 float(np.max(all_xy[:, 0]) - np.min(all_xy[:, 0])),
@@ -493,6 +514,9 @@ def main() -> int:
             change_step(-1)
         elif event.key in ("right", "n"):
             change_step(1)
+        elif event.key == "r":
+            state["user_zoomed"] = False
+            update()
 
     fig.canvas.mpl_connect("key_press_event", on_key)
 

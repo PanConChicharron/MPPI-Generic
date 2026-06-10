@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -198,6 +199,81 @@ def load_centerline(path: Path) -> tuple[np.ndarray | None, np.ndarray | None]:
     return cxy[:, 0], cxy[:, 1]
 
 
+def load_boundary_limits(
+    meta: dict[str, float],
+    default_half_width: float = 0.8,
+    log_hint: str | Path | None = None,
+) -> tuple[float, float]:
+    """Return (left_half, right_half) off-road limits in meters (path-left = +left)."""
+    left = meta.get("boundary_threshold_left", -1.0)
+    right = meta.get("boundary_threshold_right", -1.0)
+    sym = meta.get("boundary_threshold", default_half_width)
+    if left >= 0.0 and right >= 0.0:
+        return float(left), float(right)
+    if left >= 0.0:
+        return float(left), float(sym if sym > 0.0 else left)
+    if right >= 0.0:
+        return float(sym if sym > 0.0 else right), float(right)
+    if log_hint is not None:
+        hint = str(log_hint).lower()
+        if "two_lane_double_park" in hint:
+            # Matches first_order_dubins_two_lane_double_park_example.cu cost limits.
+            return 0.85, 2.14
+    return float(sym), float(sym)
+
+
+def draw_road_boundaries(
+    ax,
+    cpx: np.ndarray,
+    cpy: np.ndarray,
+    left_half: float,
+    right_half: float | None = None,
+    *,
+    color: str = "#2858b0",
+    alpha: float = 0.85,
+    linewidth: float = 1.6,
+    fill_alpha: float = 0.08,
+) -> None:
+    """Draw cost off-road edges offset from a polyline centerline."""
+    if cpx is None or cpy is None or len(cpx) < 2:
+        return
+    if right_half is None:
+        right_half = left_half
+    if left_half <= 0.0 or right_half <= 0.0:
+        return
+
+    dx = np.diff(cpx)
+    dy = np.diff(cpy)
+    seg_len = np.hypot(dx, dy)
+    seg_len = np.maximum(seg_len, 1e-9)
+    tx = dx / seg_len
+    ty = dy / seg_len
+    px = np.empty(len(cpx))
+    py = np.empty(len(cpx))
+    px[0] = tx[0]
+    py[0] = ty[0]
+    px[1:] = tx
+    py[1:] = ty
+
+    nx = -py
+    ny = px
+    left_x = cpx + left_half * nx
+    left_y = cpy + left_half * ny
+    right_x = cpx - right_half * nx
+    right_y = cpy - right_half * ny
+
+    ax.fill(
+        np.concatenate([left_x, right_x[::-1]]),
+        np.concatenate([left_y, right_y[::-1]]),
+        color=color,
+        alpha=fill_alpha,
+        linewidth=0,
+        zorder=0,
+    )
+    ax.plot(left_x, left_y, color=color, alpha=alpha, linewidth=linewidth, linestyle="-", zorder=1, label="road boundary")
+    ax.plot(right_x, right_y, color=color, alpha=alpha, linewidth=linewidth, linestyle="-", zorder=1)
+
+
 def load_steps_index(path: Path) -> list[tuple[int, float, str]]:
     rows: list[tuple[int, float, str]] = []
     with path.open(newline="") as f:
@@ -296,3 +372,139 @@ def recompute_weights(raw_cost: np.ndarray, baseline: float, lambda_val: float) 
     else:
         norm = w / normalizer
     return w, norm, normalizer
+
+
+def _axis_uses_equal_aspect(ax) -> bool:
+    aspect = ax.get_aspect()
+    if aspect == "equal":
+        return True
+    if isinstance(aspect, str):
+        return aspect.startswith("equal")
+    return False
+
+
+def _zoom_axis_at_cursor(ax, xdata: float, ydata: float, scale_factor: float) -> None:
+    x0, x1 = ax.get_xlim()
+    y0, y1 = ax.get_ylim()
+    relx = (x1 - xdata) / max(x1 - x0, 1e-12)
+    rely = (y1 - ydata) / max(y1 - y0, 1e-12)
+
+    if _axis_uses_equal_aspect(ax):
+        span = max(x1 - x0, y1 - y0, 1e-12)
+        new_span = max(span * scale_factor, 1e-9)
+        ax.set_xlim(xdata - new_span * relx, xdata + new_span * (1.0 - relx))
+        ax.set_ylim(ydata - new_span * rely, ydata + new_span * (1.0 - rely))
+        return
+
+    new_xspan = max((x1 - x0) * scale_factor, 1e-9)
+    new_yspan = max((y1 - y0) * scale_factor, 1e-9)
+    ax.set_xlim(xdata - new_xspan * relx, xdata + new_xspan * (1.0 - relx))
+    ax.set_ylim(ydata - new_yspan * rely, ydata + new_yspan * (1.0 - rely))
+
+
+def enable_plot_navigation(
+    fig,
+    axes: list | None = None,
+    *,
+    base_scale: float = 1.15,
+    on_user_nav: Callable[[object], None] | None = None,
+) -> None:
+    """Scroll to zoom and left-click drag to pan on the given axes.
+
+    Widget axes (sliders, buttons) are skipped automatically when *axes* is None
+    by ignoring axes shorter than 6% of the figure height.
+    """
+    nav_axes = axes
+    if nav_axes is None:
+        nav_axes = [ax for ax in fig.axes if ax.get_position().height > 0.06]
+    nav_axes = list(nav_axes)
+
+    pan_state: dict[str, object | None] = {
+        "active": False,
+        "ax": None,
+        "xpress": None,
+        "ypress": None,
+        "xlim": None,
+        "ylim": None,
+    }
+
+    def notify(ax) -> None:
+        if on_user_nav is not None:
+            on_user_nav(ax)
+
+    def on_scroll(event) -> None:
+        if event.inaxes is None or event.inaxes not in nav_axes:
+            return
+        if event.xdata is None or event.ydata is None:
+            return
+        if event.button == "up":
+            scale = 1.0 / base_scale
+        elif event.button == "down":
+            scale = base_scale
+        else:
+            return
+        _zoom_axis_at_cursor(event.inaxes, float(event.xdata), float(event.ydata), scale)
+        notify(event.inaxes)
+        fig.canvas.draw_idle()
+
+    def on_press(event) -> None:
+        if event.inaxes is None or event.inaxes not in nav_axes or event.button != 1:
+            return
+        if event.xdata is None or event.ydata is None:
+            return
+        pan_state["active"] = True
+        pan_state["ax"] = event.inaxes
+        pan_state["xpress"] = float(event.xdata)
+        pan_state["ypress"] = float(event.ydata)
+        pan_state["xlim"] = event.inaxes.get_xlim()
+        pan_state["ylim"] = event.inaxes.get_ylim()
+
+    def on_motion(event) -> None:
+        if not pan_state["active"]:
+            return
+        ax = pan_state["ax"]
+        if ax is None:
+            return
+        xpress = pan_state["xpress"]
+        ypress = pan_state["ypress"]
+        xlim0 = pan_state["xlim"]
+        ylim0 = pan_state["ylim"]
+        if xpress is None or ypress is None or xlim0 is None or ylim0 is None:
+            return
+
+        xdata = event.xdata
+        ydata = event.ydata
+        if xdata is None or ydata is None:
+            if event.inaxes is ax:
+                return
+            # Allow panning to continue when the cursor leaves the axes briefly.
+            inv = ax.transData.inverted()
+            xdata, ydata = inv.transform((event.x, event.y))
+
+        dx = float(xdata) - float(xpress)
+        dy = float(ydata) - float(ypress)
+        ax.set_xlim(float(xlim0[0]) - dx, float(xlim0[1]) - dx)
+        ax.set_ylim(float(ylim0[0]) - dy, float(ylim0[1]) - dy)
+        notify(ax)
+        fig.canvas.draw_idle()
+
+    def on_release(event) -> None:
+        if event.button == 1:
+            pan_state["active"] = False
+            pan_state["ax"] = None
+
+    fig.canvas.mpl_connect("scroll_event", on_scroll)
+    fig.canvas.mpl_connect("button_press_event", on_press)
+    fig.canvas.mpl_connect("motion_notify_event", on_motion)
+    fig.canvas.mpl_connect("button_release_event", on_release)
+
+
+def enable_scroll_zoom(
+    fig,
+    axes: list | None = None,
+    *,
+    base_scale: float = 1.15,
+    on_user_zoom: Callable[[object], None] | None = None,
+) -> None:
+    """Enable scroll zoom and click-drag pan (alias for enable_plot_navigation)."""
+    enable_plot_navigation(fig, axes, base_scale=base_scale, on_user_nav=on_user_zoom)

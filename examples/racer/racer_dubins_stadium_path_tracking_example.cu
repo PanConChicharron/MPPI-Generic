@@ -104,6 +104,7 @@ int main(int argc, char** argv)
     {
       return 1;
     }
+    data_mgr.setRoadBoundaryLimits(kRoadHalfWidth, kRoadHalfWidth);
 
     // Parked cars along both shoulders (near road boundary), alternating L/R with gaps for weaving.
     constexpr float kRoadHalfWidth = 0.8F;

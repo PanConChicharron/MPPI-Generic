@@ -166,6 +166,7 @@ int main(int argc, char** argv)
 
     // 8. Prepare visualization
     cv::Mat base_frame = mppi::viz::makeWhiteFrame(1024, 1024);
+    mppi::viz::drawRoadBoundaries(base_frame, path, 0.8F);
     mppi::viz::drawCenterline(base_frame, path);
     // Draw obstacles on base frame
     for (const auto& obs : obstacles) {

@@ -21,6 +21,7 @@
 #include <mppi/path/path2d.hpp>
 
 #include <fstream>
+#include <cmath>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -80,7 +81,7 @@ inline void writeCenterlineForLog(const mppi::path::Path2D& path, const std::str
 template <class DYN_T>
 void writeMeta(const std::string& path, const typename DYN_T::state_array& x, float dt, float lambda, int horizon,
                int num_rollouts, int num_logged_traj, float baseline, float normalizer, int sim_step = -1,
-               float sim_time = -1.0F)
+               float sim_time = -1.0F, float boundary_left = -1.0F, float boundary_right = -1.0F)
 {
   using S = typename DYN_T::DYN_PARAMS_T::StateIndex;
   std::ofstream f(path.c_str());
@@ -109,6 +110,22 @@ void writeMeta(const std::string& path, const typename DYN_T::state_array& x, fl
   f << "init_yaw," << x(static_cast<int>(S::YAW)) << "\n";
   f << "init_vel_x," << x(static_cast<int>(S::VEL_X)) << "\n";
   f << "init_steer," << x(static_cast<int>(S::STEER_ANGLE)) << "\n";
+  if (boundary_left >= 0.0F)
+  {
+    f << "boundary_threshold_left," << boundary_left << "\n";
+  }
+  if (boundary_right >= 0.0F)
+  {
+    f << "boundary_threshold_right," << boundary_right << "\n";
+  }
+  if (boundary_left >= 0.0F && boundary_right < 0.0F)
+  {
+    f << "boundary_threshold," << boundary_left << "\n";
+  }
+  else if (boundary_left >= 0.0F && boundary_right >= 0.0F && std::abs(boundary_left - boundary_right) < 1.0E-6F)
+  {
+    f << "boundary_threshold," << boundary_left << "\n";
+  }
 }
 
 inline void writeCosts(const std::string& path, const std::vector<float>& raw_costs,

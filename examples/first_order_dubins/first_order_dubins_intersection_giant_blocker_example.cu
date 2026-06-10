@@ -99,6 +99,7 @@ int main(int argc, char** argv)
   {
     return 1;
   }
+  data_mgr.setRoadBoundaryLimits(kRoadHalfWidth, kRoadHalfWidth);
 
   std::vector<mppi::cost::MovingCarObstacle> cross_traffic = mppi::cost::intersectionGiantBlocker();
   const mppi::cost::MovingCarObstacle& giant = cross_traffic.front();
