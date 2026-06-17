@@ -61,6 +61,9 @@ public:
 
   void calculateSampledStateTrajectories() override;
 
+  /** Run visualization rollouts on GPU only (no D2H). Pair with viz::fillRolloutsFromDevice. */
+  void launchSampledVisTrajectories();
+
   void chooseAppropriateKernel() override;
 
 protected:

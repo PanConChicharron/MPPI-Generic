@@ -1,5 +1,7 @@
 #include <mppi/controllers/controller.cuh>
 
+#include <cstring>
+
 #define CONTROLLER_TEMPLATE                                                                                            \
   template <class DYN_T, class COST_T, class FB_T, class SAMPLING_T, int MAX_TIMESTEPS, int NUM_ROLLOUTS,              \
             class PARAMS_T>
@@ -280,6 +282,75 @@ std::vector<float> CONTROLLER::getSampledNoise()
                                cudaMemcpyDeviceToHost, stream_));
   HANDLE_ERROR(cudaStreamSynchronize(stream_));
   return vector;
+}
+
+CONTROLLER_TEMPLATE
+typename CONTROLLER::SampledVisDeviceView CONTROLLER::sampledVisDeviceView() const
+{
+  SampledVisDeviceView view{};
+  if (sampled_states_CUDA_mem_init_)
+  {
+    view.outputs_d = sampled_outputs_d_;
+    view.costs_d = sampled_costs_d_;
+    view.num_rollouts = getTotalSampledTrajectories();
+    view.num_timesteps = getNumTimesteps();
+    view.output_dim = DYN_T::OUTPUT_DIM;
+    view.stream = vis_stream_;
+  }
+  return view;
+}
+
+CONTROLLER_TEMPLATE
+void CONTROLLER::downloadSampledVisTrajectoriesToHost()
+{
+  const int num_sampled_trajectories = getTotalSampledTrajectories();
+  if (num_sampled_trajectories <= 0 || !sampled_states_CUDA_mem_init_)
+  {
+    return;
+  }
+
+  const int num_timesteps = getNumTimesteps();
+  const int output_dim = DYN_T::OUTPUT_DIM;
+  const size_t out_floats =
+      static_cast<size_t>(num_sampled_trajectories) * static_cast<size_t>(num_timesteps - 1) * static_cast<size_t>(output_dim);
+  const size_t cost_floats =
+      static_cast<size_t>(num_sampled_trajectories) * static_cast<size_t>(num_timesteps + 1);
+  const size_t crash_ints = static_cast<size_t>(num_sampled_trajectories) * static_cast<size_t>(num_timesteps);
+
+  if (sampled_outputs_host_flat_.size() != out_floats)
+  {
+    sampled_outputs_host_flat_.resize(out_floats);
+  }
+  if (sampled_costs_host_flat_.size() != cost_floats)
+  {
+    sampled_costs_host_flat_.resize(cost_floats);
+  }
+  if (sampled_crash_status_host_flat_.size() != crash_ints)
+  {
+    sampled_crash_status_host_flat_.resize(crash_ints);
+  }
+
+  HANDLE_ERROR(cudaMemcpyAsync(sampled_outputs_host_flat_.data(), sampled_outputs_d_, out_floats * sizeof(float),
+                               cudaMemcpyDeviceToHost, vis_stream_));
+  HANDLE_ERROR(cudaMemcpyAsync(sampled_costs_host_flat_.data(), sampled_costs_d_, cost_floats * sizeof(float),
+                               cudaMemcpyDeviceToHost, vis_stream_));
+  HANDLE_ERROR(cudaMemcpyAsync(sampled_crash_status_host_flat_.data(), sampled_crash_status_d_,
+                               crash_ints * sizeof(int), cudaMemcpyDeviceToHost, vis_stream_));
+  HANDLE_ERROR(cudaStreamSynchronize(vis_stream_));
+
+  for (int i = 0; i < num_sampled_trajectories; ++i)
+  {
+    std::memcpy(sampled_trajectories_[static_cast<size_t>(i)].data(),
+                sampled_outputs_host_flat_.data() + static_cast<size_t>(i) * static_cast<size_t>(num_timesteps - 1) *
+                                                        static_cast<size_t>(output_dim),
+                static_cast<size_t>(num_timesteps - 1) * static_cast<size_t>(output_dim) * sizeof(float));
+    std::memcpy(sampled_costs_[static_cast<size_t>(i)].data(),
+                sampled_costs_host_flat_.data() + static_cast<size_t>(i) * static_cast<size_t>(num_timesteps + 1),
+                static_cast<size_t>(num_timesteps + 1) * sizeof(float));
+    std::memcpy(sampled_crash_status_[static_cast<size_t>(i)].data(),
+                sampled_crash_status_host_flat_.data() + static_cast<size_t>(i) * static_cast<size_t>(num_timesteps),
+                static_cast<size_t>(num_timesteps) * sizeof(int));
+  }
 }
 
 #undef CONTROLLER_TEMPLATE

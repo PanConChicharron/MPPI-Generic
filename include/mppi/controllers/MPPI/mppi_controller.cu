@@ -259,11 +259,10 @@ void VanillaMPPI::smoothControlTrajectory()
 }
 
 VANILLA_MPPI_TEMPLATE
-void VanillaMPPI::calculateSampledStateTrajectories()
+void VanillaMPPI::launchSampledVisTrajectories()
 {
-  int num_sampled_trajectories = this->getTotalSampledTrajectories();
+  const int num_sampled_trajectories = this->getTotalSampledTrajectories();
 
-  // control already copied in compute control, so run kernel
   if (this->getKernelChoiceAsEnum() == kernelType::USE_SPLIT_KERNELS)
   {
     mppi::kernels::launchVisualizeCostKernel<COST_T, SAMPLING_T>(
@@ -278,23 +277,13 @@ void VanillaMPPI::calculateSampledStateTrajectories()
         this->getLambda(), this->getAlpha(), this->vis_initial_state_d_, this->sampled_outputs_d_,
         this->sampled_costs_d_, this->sampled_crash_status_d_, this->params_.visualize_dim_, this->stream_, false);
   }
+}
 
-  for (int i = 0; i < num_sampled_trajectories; i++)
-  {
-    // set initial state to the first location
-    // shifted by one since we do not save the initial state
-    HANDLE_ERROR(cudaMemcpyAsync(this->sampled_trajectories_[i].data(),
-                                 this->sampled_outputs_d_ + i * this->getNumTimesteps() * DYN_T::OUTPUT_DIM,
-                                 (this->getNumTimesteps() - 1) * DYN_T::OUTPUT_DIM * sizeof(float),
-                                 cudaMemcpyDeviceToHost, this->vis_stream_));
-    HANDLE_ERROR(
-        cudaMemcpyAsync(this->sampled_costs_[i].data(), this->sampled_costs_d_ + (i * (this->getNumTimesteps() + 1)),
-                        (this->getNumTimesteps() + 1) * sizeof(float), cudaMemcpyDeviceToHost, this->vis_stream_));
-    HANDLE_ERROR(cudaMemcpyAsync(this->sampled_crash_status_[i].data(),
-                                 this->sampled_crash_status_d_ + (i * this->getNumTimesteps()),
-                                 this->getNumTimesteps() * sizeof(int), cudaMemcpyDeviceToHost, this->vis_stream_));
-  }
-  HANDLE_ERROR(cudaStreamSynchronize(this->vis_stream_));
+VANILLA_MPPI_TEMPLATE
+void VanillaMPPI::calculateSampledStateTrajectories()
+{
+  launchSampledVisTrajectories();
+  this->downloadSampledVisTrajectoriesToHost();
 }
 
 #undef VANILLA_MPPI_TEMPLATE

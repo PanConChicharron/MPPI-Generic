@@ -291,6 +291,22 @@ public:
     return sampled_crash_status_;
   }
 
+  /** Device buffers filled by calculateSampledStateTrajectories / launchSampledVisTrajectories. */
+  struct SampledVisDeviceView
+  {
+    const float* outputs_d = nullptr;
+    const float* costs_d = nullptr;
+    int num_rollouts = 0;
+    int num_timesteps = 0;
+    int output_dim = 0;
+    cudaStream_t stream = nullptr;
+  };
+
+  SampledVisDeviceView sampledVisDeviceView() const;
+
+  /** One batched D2H copy into getSampledOutputTrajectories() / getSampledCostTrajectories() host caches. */
+  void downloadSampledVisTrajectoriesToHost();
+
   virtual std::vector<float> getTopTransformedCosts() const
   {
     return top_n_costs_;
@@ -983,6 +999,10 @@ protected:
   std::vector<output_trajectory> sampled_trajectories_;  // sampled state trajectories from state trajectory kernel
   std::vector<cost_trajectory> sampled_costs_;
   std::vector<crash_status_trajectory> sampled_crash_status_;
+
+  std::vector<float> sampled_outputs_host_flat_;
+  std::vector<float> sampled_costs_host_flat_;
+  std::vector<int> sampled_crash_status_host_flat_;
 
   // Propagated real state trajectory
   state_trajectory propagated_feedback_state_trajectory_ = state_trajectory::Zero();
